@@ -15,14 +15,14 @@ from typing import Optional, Dict
 
 
 class BatteryWidget(QWidget):
-    """Custom battery indicator widget"""
+    """Custom vertical battery indicator widget"""
     
     def __init__(self, cell_num: int = 1):
         super().__init__()
         self.cell_num = cell_num
         self.voltage = 0.0
         self.percentage = 0
-        self.setFixedSize(180, 45)
+        self.setFixedSize(90, 160)
         self.setStyleSheet("background-color: transparent;")
     
     def set_voltage(self, voltage: float):
@@ -38,14 +38,18 @@ class BatteryWidget(QWidget):
         self.update()
     
     def paintEvent(self, event):
-        """Draw the battery"""
+        """Draw the vertical battery"""
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         
-        # Battery dimensions
-        x, y = 5, 8
-        width, height = 120, 28
-        tip_width = 6
+        # Battery dimensions (vertical orientation)
+        widget_width = self.width()
+        battery_width = 50
+        battery_height = 80
+        x = (widget_width - battery_width) // 2
+        y = 5
+        tip_height = 8
+        tip_width = 20
         
         # Determine color based on voltage
         if self.voltage <= 2.0:
@@ -61,36 +65,55 @@ class BatteryWidget(QWidget):
             fill_color = QColor(50, 255, 50)  # Green
             text_color = QColor(100, 255, 100)
         
-        # Draw battery outline
+        # Draw battery tip (positive terminal at top)
         painter.setPen(QPen(QColor(100, 100, 100), 2))
         painter.setBrush(QBrush(QColor(30, 30, 30)))
-        painter.drawRoundedRect(x, y, width, height, 4, 4)
+        tip_x = x + (battery_width - tip_width) // 2
+        painter.drawRect(tip_x, y, tip_width, tip_height)
         
-        # Draw battery tip (positive terminal)
-        painter.drawRect(x + width, y + 8, tip_width, 12)
+        # Draw battery body outline
+        body_y = y + tip_height
+        painter.drawRoundedRect(x, body_y, battery_width, battery_height, 6, 6)
         
-        # Draw fill based on percentage
+        # Draw fill based on percentage (fills from bottom up)
         if self.percentage > 0:
-            fill_width = int((width - 6) * self.percentage / 100)
+            fill_height = int((battery_height - 6) * self.percentage / 100)
+            fill_y = body_y + battery_height - 3 - fill_height
             painter.setPen(Qt.PenStyle.NoPen)
             painter.setBrush(QBrush(fill_color))
-            painter.drawRoundedRect(x + 3, y + 3, fill_width, height - 6, 2, 2)
-        
-        # Draw cell number and voltage text
-        painter.setPen(QPen(text_color))
-        font = painter.font()
-        font.setPointSize(9)
-        font.setBold(True)
-        painter.setFont(font)
-        
-        # Cell label
-        painter.drawText(x + width + 12, y + 20, f"C{self.cell_num}: {self.voltage:.2f}V")
+            painter.drawRoundedRect(x + 3, fill_y, battery_width - 6, fill_height, 3, 3)
         
         # Percentage inside battery
         painter.setPen(QPen(QColor(255, 255, 255)))
-        font.setPointSize(10)
+        font = painter.font()
+        font.setPointSize(11)
+        font.setBold(True)
         painter.setFont(font)
-        painter.drawText(x + 35, y + 20, f"{self.percentage}%")
+        percent_text = f"{self.percentage}%"
+        text_rect = painter.fontMetrics().boundingRect(percent_text)
+        text_x = x + (battery_width - text_rect.width()) // 2
+        text_y = body_y + battery_height // 2 + 5
+        painter.drawText(text_x, text_y, percent_text)
+        
+        # Draw cell number below battery
+        painter.setPen(QPen(text_color))
+        font.setPointSize(14)
+        font.setBold(True)
+        painter.setFont(font)
+        cell_text = f"C{self.cell_num}"
+        text_rect = painter.fontMetrics().boundingRect(cell_text)
+        text_x = (widget_width - text_rect.width()) // 2
+        text_y = body_y + battery_height + 22
+        painter.drawText(text_x, text_y, cell_text)
+        
+        # Draw voltage below cell number
+        font.setPointSize(13)
+        painter.setFont(font)
+        voltage_text = f"{self.voltage:.2f}V"
+        text_rect = painter.fontMetrics().boundingRect(voltage_text)
+        text_x = (widget_width - text_rect.width()) // 2
+        text_y = body_y + battery_height + 42
+        painter.drawText(text_x, text_y, voltage_text)
 
 
 class MasterPage(QWidget):
@@ -253,15 +276,17 @@ class MasterPage(QWidget):
         voltage_layout = QVBoxLayout(voltage_group)
         
         battery_grid = QGridLayout()
-        battery_grid.setSpacing(5)
+        battery_grid.setSpacing(10)
+        battery_grid.setContentsMargins(10, 10, 10, 10)
         tab.battery_widgets = []
         
+        # 8 batteries per row for vertical layout
         for i in range(16):
             battery = BatteryWidget(i + 1)
             tab.battery_widgets.append(battery)
-            row = i // 4
-            col = i % 4
-            battery_grid.addWidget(battery, row, col)
+            row = i // 8
+            col = i % 8
+            battery_grid.addWidget(battery, row, col, Qt.AlignmentFlag.AlignCenter)
         
         voltage_layout.addLayout(battery_grid)
         tab_layout.addWidget(voltage_group)

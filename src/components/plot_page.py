@@ -168,32 +168,35 @@ class PlotPage(QWidget):
         # Voltage Graph Tab with toggle buttons
         voltage_container = QWidget()
         voltage_layout = QVBoxLayout(voltage_container)
-        voltage_layout.setContentsMargins(5, 5, 5, 5)
-        voltage_layout.setSpacing(5)
+        voltage_layout.setContentsMargins(2, 2, 2, 2)
+        voltage_layout.setSpacing(2)
         
-        # Toggle buttons for cells
+        # Toggle buttons for cells - compact strip
         voltage_toggle_frame = QFrame()
-        voltage_toggle_frame.setStyleSheet("background-color: rgb(25, 45, 40); border-radius: 5px; padding: 5px;")
+        voltage_toggle_frame.setFixedHeight(36)
+        voltage_toggle_frame.setStyleSheet("background-color: rgb(25, 45, 40); border-radius: 4px;")
         voltage_toggle_layout = QHBoxLayout(voltage_toggle_frame)
-        voltage_toggle_layout.setContentsMargins(5, 5, 5, 5)
-        voltage_toggle_layout.setSpacing(3)
+        voltage_toggle_layout.setContentsMargins(8, 2, 8, 2)
+        voltage_toggle_layout.setSpacing(2)
         
-        voltage_toggle_layout.addWidget(QLabel("Toggle Cells:"))
+        toggle_label = QLabel("Cells:")
+        toggle_label.setStyleSheet("color: #96c896; font-size: 11px; font-weight: bold;")
+        voltage_toggle_layout.addWidget(toggle_label)
         self.graph_widgets[device_id] = {'voltage_toggles': []}
         
         for i in range(16):
             btn = QPushButton(str(i+1))
             btn.setCheckable(True)
             btn.setChecked(True)
-            btn.setFixedSize(28, 28)
+            btn.setFixedSize(24, 24)
             btn.setStyleSheet(f"""
                 QPushButton {{
                     background-color: {cell_colors[i]};
                     color: #000000;
                     border: 2px solid #333;
-                    border-radius: 14px;
+                    border-radius: 12px;
                     font-weight: bold;
-                    font-size: 10px;
+                    font-size: 9px;
                 }}
                 QPushButton:checked {{
                     background-color: {cell_colors[i]};
@@ -213,7 +216,7 @@ class PlotPage(QWidget):
         voltage_layout.addWidget(voltage_toggle_frame)
         
         voltage_graph = self._create_graph_widget()
-        voltage_layout.addWidget(voltage_graph)
+        voltage_layout.addWidget(voltage_graph, 1)  # stretch factor = 1 to take remaining space
         self.graph_widgets[device_id]['voltage'] = voltage_graph
         self._graph_initialized[device_id] = {'voltage': False}
         
@@ -229,30 +232,34 @@ class PlotPage(QWidget):
         # Temperature Graph Tab with toggle buttons
         temp_container = QWidget()
         temp_layout = QVBoxLayout(temp_container)
-        temp_layout.setContentsMargins(5, 5, 5, 5)
-        temp_layout.setSpacing(5)
+        temp_layout.setContentsMargins(2, 2, 2, 2)
+        temp_layout.setSpacing(2)
         
+        # Toggle buttons for zones - compact strip
         temp_toggle_frame = QFrame()
-        temp_toggle_frame.setStyleSheet("background-color: rgb(25, 45, 40); border-radius: 5px; padding: 5px;")
+        temp_toggle_frame.setFixedHeight(36)
+        temp_toggle_frame.setStyleSheet("background-color: rgb(25, 45, 40); border-radius: 4px;")
         temp_toggle_layout = QHBoxLayout(temp_toggle_frame)
-        temp_toggle_layout.setContentsMargins(5, 5, 5, 5)
+        temp_toggle_layout.setContentsMargins(8, 2, 8, 2)
         
-        temp_toggle_layout.addWidget(QLabel("Toggle Zones:"))
+        zone_label = QLabel("Zones:")
+        zone_label.setStyleSheet("color: #96c896; font-size: 11px; font-weight: bold;")
+        temp_toggle_layout.addWidget(zone_label)
         self.graph_widgets[device_id]['temp_toggles'] = []
         
         for i in range(4):
             btn = QPushButton(f"Z{i+1}")
             btn.setCheckable(True)
             btn.setChecked(True)
-            btn.setFixedSize(36, 28)
+            btn.setFixedSize(32, 24)
             btn.setStyleSheet(f"""
                 QPushButton {{
                     background-color: {temp_colors[i]};
                     color: #000;
                     border: 2px solid #333;
-                    border-radius: 14px;
+                    border-radius: 12px;
                     font-weight: bold;
-                    font-size: 10px;
+                    font-size: 9px;
                 }}
                 QPushButton:checked {{
                     background-color: {temp_colors[i]};
@@ -272,7 +279,7 @@ class PlotPage(QWidget):
         temp_layout.addWidget(temp_toggle_frame)
         
         temp_graph = self._create_graph_widget()
-        temp_layout.addWidget(temp_graph)
+        temp_layout.addWidget(temp_graph, 1)  # stretch factor = 1 to take remaining space
         self.graph_widgets[device_id]['temp'] = temp_graph
         self._graph_initialized[device_id]['temp'] = False
         
@@ -295,7 +302,9 @@ class PlotPage(QWidget):
     def _create_graph_widget(self) -> QWebEngineView:
         """Create a graph widget with Plotly base HTML"""
         widget = QWebEngineView()
-        widget.setMinimumHeight(450)
+        widget.setMinimumHeight(200)
+        from PyQt6.QtWidgets import QSizePolicy
+        widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         
         base_html = """
         <!DOCTYPE html>
@@ -792,11 +801,11 @@ class PlotPage(QWidget):
             'title': {'text': title, 'font': {'size': 14, 'color': '#f0f8ff'}},
             'xaxis': {'title': 'Time', 'showgrid': True, 'gridcolor': 'rgba(2, 44, 34, 0.5)'},
             'yaxis': {'title': y_title, 'showgrid': True, 'gridcolor': 'rgba(2, 44, 34, 0.5)'},
-            'height': 420,
+            'autosize': True,
             'showlegend': True,
             'legend': {'orientation': 'v', 'x': 1.02, 'y': 1, 'font': {'size': 10},
                       'bgcolor': 'rgba(15, 35, 30, 0.9)'},
-            'margin': {'l': 60, 'r': 150, 't': 40, 'b': 50},
+            'margin': {'l': 60, 'r': 150, 't': 35, 'b': 40},
             'paper_bgcolor': 'rgb(15, 35, 30)',
             'plot_bgcolor': 'rgb(25, 45, 40)',
             'hovermode': 'x unified'

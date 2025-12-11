@@ -1,0 +1,20 @@
+# BMS Monitor App V2 - Dependencies
+# Install with: pip install -r requirements.txt
+
+# GUI Framework
+PyQt6>=6.6.0
+PyQt6-WebEngine>=6.6.0
+
+# Serial Communication
+pyserial>=3.5
+
+# Data Processing
+pandas>=2.0.0
+numpy>=1.24.0
+
+# Plotting
+plotly>=5.17.0
+
+# Build Tools (optional - only needed for creating executables)
+# pyinstaller>=6.0.0
+

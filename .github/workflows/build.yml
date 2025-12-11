@@ -1,0 +1,185 @@
+name: Build Executables
+
+on:
+  push:
+    tags:
+      - 'v*'  # Trigger on version tags like v1.0.0, v2.0.0
+  workflow_dispatch:  # Allow manual trigger from GitHub UI
+    inputs:
+      platforms:
+        description: 'Platforms to build'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - windows
+          - linux
+          - macos
+
+jobs:
+  build-windows:
+    if: ${{ github.event.inputs.platforms == 'all' || github.event.inputs.platforms == 'windows' || github.event_name == 'push' }}
+    runs-on: windows-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller>=6.0.0
+          pip install PyQt6>=6.6.0 PyQt6-WebEngine>=6.6.0
+          pip install pyserial>=3.5 pandas>=2.0.0 numpy>=1.24.0 plotly>=5.17.0
+
+      - name: Build Windows executable
+        run: python build.py --platform windows --clean
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: BMSMonitorApp-Windows
+          path: dist/BMSMonitorApp.exe
+          retention-days: 30
+
+  build-linux:
+    if: ${{ github.event.inputs.platforms == 'all' || github.event.inputs.platforms == 'linux' || github.event_name == 'push' }}
+    runs-on: ubuntu-22.04
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libxcb-xinerama0 \
+            libxkbcommon-x11-0 \
+            libxcb-cursor0 \
+            libegl1 \
+            libgl1-mesa-glx \
+            libxcb-icccm4 \
+            libxcb-image0 \
+            libxcb-keysyms1 \
+            libxcb-randr0 \
+            libxcb-render-util0 \
+            libxcb-shape0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller>=6.0.0
+          pip install PyQt6>=6.6.0 PyQt6-WebEngine>=6.6.0
+          pip install pyserial>=3.5 pandas>=2.0.0 numpy>=1.24.0 plotly>=5.17.0
+
+      - name: Build Linux executable
+        run: python build.py --platform linux --clean
+
+      - name: Make executable
+        run: chmod +x dist/BMSMonitorApp
+
+      - name: Upload Linux artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: BMSMonitorApp-Linux
+          path: dist/BMSMonitorApp
+          retention-days: 30
+
+  build-macos:
+    if: ${{ github.event.inputs.platforms == 'all' || github.event.inputs.platforms == 'macos' || github.event_name == 'push' }}
+    runs-on: macos-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller>=6.0.0
+          pip install PyQt6>=6.6.0 PyQt6-WebEngine>=6.6.0
+          pip install pyserial>=3.5 pandas>=2.0.0 numpy>=1.24.0 plotly>=5.17.0
+
+      - name: Build macOS app
+        run: python build.py --platform mac --clean
+
+      - name: Create DMG (optional)
+        run: |
+          # Compress the .app bundle
+          cd dist
+          zip -r BMSMonitorApp-macOS.zip BMSMonitorApp.app
+
+      - name: Upload macOS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: BMSMonitorApp-macOS
+          path: dist/BMSMonitorApp-macOS.zip
+          retention-days: 30
+
+  # Create release when a tag is pushed
+  release:
+    needs: [build-windows, build-linux, build-macos]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    permissions:
+      contents: write
+    
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Display structure of downloaded files
+        run: ls -R artifacts
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          name: BMS Monitor App ${{ github.ref_name }}
+          body: |
+            ## BMS Monitor App ${{ github.ref_name }}
+            
+            ### Downloads
+            - **Windows**: `BMSMonitorApp.exe`
+            - **Linux**: `BMSMonitorApp` (make executable with `chmod +x`)
+            - **macOS**: `BMSMonitorApp-macOS.zip` (extract and run .app)
+            
+            ### Requirements
+            - Windows: Windows 10 or later
+            - Linux: Ubuntu 20.04+ or equivalent
+            - macOS: macOS 11 (Big Sur) or later
+            
+            ### First-time Setup
+            - **Windows**: May need to allow in Windows Defender
+            - **macOS**: Right-click → Open (first time only, for unsigned app)
+            - **Linux**: `chmod +x BMSMonitorApp` then `./BMSMonitorApp`
+          files: |
+            artifacts/BMSMonitorApp-Windows/BMSMonitorApp.exe
+            artifacts/BMSMonitorApp-Linux/BMSMonitorApp
+            artifacts/BMSMonitorApp-macOS/BMSMonitorApp-macOS.zip
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
