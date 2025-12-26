@@ -7,7 +7,7 @@ Includes battery indicators for cell voltages
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, QLabel,
     QPushButton, QComboBox, QSpinBox, QGridLayout, QFrame,
-    QTabWidget, QScrollArea, QProgressBar
+    QTabWidget, QScrollArea, QProgressBar, QSizePolicy
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont, QPainter, QColor, QPen, QBrush
@@ -22,7 +22,9 @@ class BatteryWidget(QWidget):
         self.cell_num = cell_num
         self.voltage = 0.0
         self.percentage = 0
-        self.setFixedSize(90, 160)
+        self.setMinimumSize(60, 120)
+        self.setMaximumSize(100, 170)
+        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
         self.setStyleSheet("background-color: transparent;")
     
     def set_voltage(self, voltage: float):
@@ -42,14 +44,16 @@ class BatteryWidget(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         
-        # Battery dimensions (vertical orientation)
+        # Scale battery dimensions based on widget size
         widget_width = self.width()
-        battery_width = 50
-        battery_height = 80
+        widget_height = self.height()
+        
+        battery_width = min(45, int(widget_width * 0.55))
+        battery_height = min(70, int(widget_height * 0.5))
         x = (widget_width - battery_width) // 2
         y = 5
-        tip_height = 8
-        tip_width = 20
+        tip_height = 6
+        tip_width = int(battery_width * 0.4)
         
         # Determine color based on voltage
         if self.voltage <= 2.0:
@@ -73,7 +77,7 @@ class BatteryWidget(QWidget):
         
         # Draw battery body outline
         body_y = y + tip_height
-        painter.drawRoundedRect(x, body_y, battery_width, battery_height, 6, 6)
+        painter.drawRoundedRect(x, body_y, battery_width, battery_height, 5, 5)
         
         # Draw fill based on percentage (fills from bottom up)
         if self.percentage > 0:
@@ -86,33 +90,33 @@ class BatteryWidget(QWidget):
         # Percentage inside battery
         painter.setPen(QPen(QColor(255, 255, 255)))
         font = painter.font()
-        font.setPointSize(11)
+        font.setPointSize(9)
         font.setBold(True)
         painter.setFont(font)
         percent_text = f"{self.percentage}%"
         text_rect = painter.fontMetrics().boundingRect(percent_text)
         text_x = x + (battery_width - text_rect.width()) // 2
-        text_y = body_y + battery_height // 2 + 5
+        text_y = body_y + battery_height // 2 + 4
         painter.drawText(text_x, text_y, percent_text)
         
         # Draw cell number below battery
         painter.setPen(QPen(text_color))
-        font.setPointSize(14)
+        font.setPointSize(11)
         font.setBold(True)
         painter.setFont(font)
         cell_text = f"C{self.cell_num}"
         text_rect = painter.fontMetrics().boundingRect(cell_text)
         text_x = (widget_width - text_rect.width()) // 2
-        text_y = body_y + battery_height + 22
+        text_y = body_y + battery_height + 18
         painter.drawText(text_x, text_y, cell_text)
         
         # Draw voltage below cell number
-        font.setPointSize(13)
+        font.setPointSize(10)
         painter.setFont(font)
         voltage_text = f"{self.voltage:.2f}V"
         text_rect = painter.fontMetrics().boundingRect(voltage_text)
         text_x = (widget_width - text_rect.width()) // 2
-        text_y = body_y + battery_height + 42
+        text_y = body_y + battery_height + 35
         painter.drawText(text_x, text_y, voltage_text)
 
 
@@ -138,34 +142,38 @@ class MasterPage(QWidget):
     def setup_ui(self):
         """Setup the master page UI"""
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(10, 10, 10, 10)
-        layout.setSpacing(10)
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setSpacing(8)
         
-        # Top section: Connection and Configuration
+        # Top section: Connection and Configuration (compact)
         top_section = QWidget()
+        top_section.setMaximumHeight(120)
         top_layout = QHBoxLayout(top_section)
         top_layout.setContentsMargins(0, 0, 0, 0)
-        top_layout.setSpacing(15)
+        top_layout.setSpacing(12)
         
         # Connection section
         connection_group = QGroupBox("Connection")
         connection_layout = QVBoxLayout(connection_group)
+        connection_layout.setSpacing(5)
+        connection_layout.setContentsMargins(10, 10, 10, 10)
         
         # Port selection
         port_layout = QHBoxLayout()
         port_layout.addWidget(QLabel("COM Port:"))
         self.port_combo = QComboBox()
-        self.port_combo.setMinimumWidth(250)
+        self.port_combo.setMinimumWidth(200)
         port_layout.addWidget(self.port_combo)
         
         refresh_btn = QPushButton("Refresh")
+        refresh_btn.setMinimumWidth(80)
         refresh_btn.clicked.connect(self.refresh_ports_requested.emit)
         port_layout.addWidget(refresh_btn)
         connection_layout.addLayout(port_layout)
         
         # Connection button
         self.connect_btn = QPushButton("Connect to Master BMS")
-        self.connect_btn.setFixedHeight(35)
+        self.connect_btn.setFixedHeight(30)
         self.connect_btn.clicked.connect(self.on_connect_clicked)
         connection_layout.addWidget(self.connect_btn)
         
@@ -174,6 +182,8 @@ class MasterPage(QWidget):
         # Configuration section
         config_group = QGroupBox("Configuration")
         config_layout = QGridLayout(config_group)
+        config_layout.setSpacing(5)
+        config_layout.setContentsMargins(10, 10, 10, 10)
         
         config_layout.addWidget(QLabel("Number of Slaves:"), 0, 0)
         self.num_slaves_spin = QSpinBox()
@@ -182,7 +192,7 @@ class MasterPage(QWidget):
         self.num_slaves_spin.valueChanged.connect(self.on_num_slaves_changed)
         config_layout.addWidget(self.num_slaves_spin, 0, 1)
         
-        config_layout.addWidget(QLabel("Number of Cells (Top BMS):"), 1, 0)
+        config_layout.addWidget(QLabel("Cells (Top BMS):"), 1, 0)
         self.num_cells_spin = QSpinBox()
         self.num_cells_spin.setRange(0, 16)
         self.num_cells_spin.setValue(16)
@@ -199,17 +209,17 @@ class MasterPage(QWidget):
         self.bms_tabs.setStyleSheet("""
             QTabWidget::pane {
                 border: 2px solid rgb(2, 44, 34);
-                border-radius: 8px;
+                border-radius: 6px;
                 background-color: rgb(15, 35, 30);
             }
             QTabBar::tab {
                 background-color: rgb(25, 50, 45);
                 color: rgb(200, 220, 200);
-                padding: 10px 20px;
+                padding: 8px 16px;
                 margin-right: 2px;
-                border-top-left-radius: 8px;
-                border-top-right-radius: 8px;
-                min-width: 100px;
+                border-top-left-radius: 6px;
+                border-top-right-radius: 6px;
+                min-width: 80px;
             }
             QTabBar::tab:selected {
                 background-color: rgb(34, 139, 34);
@@ -229,7 +239,7 @@ class MasterPage(QWidget):
         self.master_tab = self._create_bms_tab("Master BMS", is_master=True)
         self.bms_tabs.addTab(self.master_tab, "Master BMS")
         
-        layout.addWidget(self.bms_tabs)
+        layout.addWidget(self.bms_tabs, stretch=1)
     
     def _create_bms_tab(self, name: str, is_master: bool = False) -> QWidget:
         """Create a tab widget for displaying BMS data with battery indicators"""
@@ -239,45 +249,54 @@ class MasterPage(QWidget):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         
         content = QWidget()
         tab_layout = QVBoxLayout(content)
-        tab_layout.setContentsMargins(10, 10, 10, 10)
-        tab_layout.setSpacing(10)
+        tab_layout.setContentsMargins(8, 8, 8, 8)
+        tab_layout.setSpacing(8)
         
         # Title
         title = QLabel(name)
         title_font = QFont()
-        title_font.setPointSize(14)
+        title_font.setPointSize(12)
         title_font.setBold(True)
         title.setFont(title_font)
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        title.setStyleSheet("color: rgb(50, 205, 50); padding: 5px;")
+        title.setStyleSheet("color: rgb(50, 205, 50); padding: 3px;")
         tab_layout.addWidget(title)
         
         if is_master:
             # Pack voltage and current (only for master)
             pack_group = QGroupBox("Pack Data")
+            pack_group.setMaximumHeight(60)
             pack_layout = QHBoxLayout(pack_group)
+            pack_layout.setContentsMargins(10, 5, 10, 5)
             
             tab.pack_voltage_label = QLabel("Pack Voltage: -- V")
-            tab.pack_voltage_label.setStyleSheet("font-size: 16px; font-weight: bold; color: rgb(100, 255, 100);")
+            tab.pack_voltage_label.setStyleSheet("font-size: 14px; font-weight: bold; color: rgb(100, 255, 100);")
             pack_layout.addWidget(tab.pack_voltage_label)
             
             tab.pack_current_label = QLabel("Pack Current: -- A")
-            tab.pack_current_label.setStyleSheet("font-size: 16px; font-weight: bold; color: rgb(255, 200, 100);")
+            tab.pack_current_label.setStyleSheet("font-size: 14px; font-weight: bold; color: rgb(255, 200, 100);")
             pack_layout.addWidget(tab.pack_current_label)
             pack_layout.addStretch()
             
             tab_layout.addWidget(pack_group)
         
+        # Horizontal layout for voltage and temperature side by side
+        data_section = QHBoxLayout()
+        data_section.setSpacing(10)
+        
         # Cell voltages with battery indicators
         voltage_group = QGroupBox("Cell Voltages (2V=0%, 5V=100%)")
         voltage_layout = QVBoxLayout(voltage_group)
+        voltage_layout.setContentsMargins(5, 10, 5, 5)
         
         battery_grid = QGridLayout()
-        battery_grid.setSpacing(10)
-        battery_grid.setContentsMargins(10, 10, 10, 10)
+        battery_grid.setSpacing(5)
+        battery_grid.setContentsMargins(5, 5, 5, 5)
         tab.battery_widgets = []
         
         # 8 batteries per row for vertical layout
@@ -289,43 +308,55 @@ class MasterPage(QWidget):
             battery_grid.addWidget(battery, row, col, Qt.AlignmentFlag.AlignCenter)
         
         voltage_layout.addLayout(battery_grid)
-        tab_layout.addWidget(voltage_group)
+        voltage_layout.addStretch()
+        data_section.addWidget(voltage_group, stretch=3)
         
-        # Temperatures
+        # Temperatures - vertical layout on the right with optimum space
         temp_group = QGroupBox("Temperatures")
-        temp_layout = QHBoxLayout(temp_group)
+        temp_group.setMinimumWidth(200)
+        temp_group.setMaximumWidth(280)
+        temp_layout = QVBoxLayout(temp_group)
+        temp_layout.setSpacing(10)
+        temp_layout.setContentsMargins(12, 15, 12, 12)
         
         tab.temp_labels = []
         temp_colors = ['#FF4444', '#FF8844', '#FFFF44', '#44FFFF']
+        temp_names = ['Zone 1', 'Zone 2', 'Zone 3', 'Zone 4']
+        
         for i in range(4):
             temp_frame = QFrame()
+            temp_frame.setMinimumHeight(65)
             temp_frame.setStyleSheet(f"""
                 QFrame {{
                     background-color: rgb(30, 50, 45);
                     border: 2px solid {temp_colors[i]};
                     border-radius: 8px;
-                    padding: 10px;
+                    padding: 8px;
                 }}
             """)
-            temp_frame_layout = QVBoxLayout(temp_frame)
+            temp_frame_layout = QHBoxLayout(temp_frame)
+            temp_frame_layout.setSpacing(10)
+            temp_frame_layout.setContentsMargins(12, 8, 12, 8)
             
-            zone_label = QLabel(f"Zone {i+1}")
-            zone_label.setStyleSheet(f"color: {temp_colors[i]}; font-weight: bold;")
-            zone_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            zone_label = QLabel(temp_names[i])
+            zone_label.setStyleSheet(f"color: {temp_colors[i]}; font-weight: bold; font-size: 13px;")
+            zone_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
             temp_frame_layout.addWidget(zone_label)
+            
+            temp_frame_layout.addStretch()
             
             temp_value = QLabel("-- °C")
             temp_value.setStyleSheet("font-size: 18px; font-weight: bold; color: white;")
-            temp_value.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            temp_value.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             temp_frame_layout.addWidget(temp_value)
             
             tab.temp_labels.append(temp_value)
             temp_layout.addWidget(temp_frame)
         
         temp_layout.addStretch()
-        tab_layout.addWidget(temp_group)
+        data_section.addWidget(temp_group, stretch=1)
         
-        tab_layout.addStretch()
+        tab_layout.addLayout(data_section, stretch=1)
         
         scroll.setWidget(content)
         

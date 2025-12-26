@@ -26,7 +26,8 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("BMS Monitor App V2")
-        self.setGeometry(100, 100, 1600, 1000)
+        self.setGeometry(100, 100, 1600, 900)
+        self.setMinimumSize(1200, 700)  # Minimum window size
         
         # Initialize logger
         self.logger = get_logger()
@@ -482,6 +483,23 @@ class MainWindow(QMainWindow):
         
         # Update plot page
         self.plot_page.add_data_point(data)
+        
+        # Update balancing page with voltage and temperature data
+        current_device = self.balancing_page.current_device_id
+        if current_device == 1:  # Master BMS
+            voltages = data.get('master_cell_voltages', [])
+            temperatures = data.get('master_temperatures', [])
+        else:  # Slave BMS
+            slave_data = data.get('slave_data', {})
+            if current_device in slave_data:
+                voltages = slave_data[current_device].get('voltages', [])
+                temperatures = slave_data[current_device].get('temperatures', [])
+            else:
+                voltages = []
+                temperatures = []
+        
+        self.balancing_page.update_cell_voltages(voltages)
+        self.balancing_page.update_temperatures(temperatures)
         
         # Update status bar with latest voltage/current
         voltage = data.get('pack_voltage', 0.0)

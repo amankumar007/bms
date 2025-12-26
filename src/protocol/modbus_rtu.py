@@ -119,6 +119,12 @@ class ModbusRTU:
     ADDR_BALANCING = 0x08
     ADDR_BALANCING_SEQ = 0x09
     ADDR_BALANCING_STATE = 0x0A
+    ADDR_DIE_TEMP_1 = 0x0C  # Version 0.3
+    ADDR_DIE_TEMP_2 = 0x0D  # Version 0.3
+    
+    # Common read word count for all data (Version 0.4)
+    # Reads: Pack Voltage (1) + Current (2) + Cell Voltages (16) + Temperatures (4) = 23 words
+    COMMON_READ_WORD_COUNT = 0x0017
     
     # Frame markers
     FRAME_START = ord('*')
@@ -305,14 +311,15 @@ class ModbusRTU:
 
 # Data conversion utilities
 class DataConverter:
-    """Utilities for converting BMS data values"""
+    """Utilities for converting BMS data values (Protocol Version 0.4)"""
     
     @staticmethod
     def voltage_from_raw(raw_value: int) -> float:
         """
         Convert raw voltage value to actual voltage
         
-        Formula: Battery voltage = (raw_value x 3.05) / 1000
+        Formula (Version 0.4): Battery voltage = raw_value / 1000
+        Example: 0xBB7E (48254) / 1000 = 48.254V
         
         Args:
             raw_value: Raw 16-bit value from BMS (0x0000 to 0xFFFF)
@@ -320,36 +327,44 @@ class DataConverter:
         Returns:
             Voltage in volts
         """
-        return (raw_value * 3.05) / 1000.0
+        return raw_value / 1000.0
     
     @staticmethod
     def current_from_raw(raw_value: int) -> float:
         """
         Convert raw current value to actual current
         
-        Formula: Battery current = (raw_value x 14.9) / 1000000
+        Formula (Version 0.4): Battery current = raw_value / 1000
         Value is in 2's complement format, range: -8388608 to 8388607
         
+        If ((Word data & 0x800000) == 0x800000)
+            Word data = ~Word data + 1
+            Word data = Word data & 0x7FFFFF
+            Battery current = (-1)(Word data) / 1000
+        Else
+            Battery current = (Word data) / 1000
+        
         Args:
-            raw_value: Raw 32-bit value from BMS (2's complement)
+            raw_value: Raw 24-bit value from BMS (2's complement, stored in 32 bits)
             
         Returns:
             Current in amperes
         """
-        # Check if negative (MSB set)
+        # Check if negative (MSB of 24-bit value set)
         if (raw_value & 0x800000) == 0x800000:
             # Negative value - convert from 2's complement
             raw_value = (~raw_value + 1) & 0x7FFFFF
-            return -1 * (raw_value * 14.9) / 1000000.0
+            return -1.0 * raw_value / 1000.0
         else:
-            return (raw_value * 14.9) / 1000000.0
+            return raw_value / 1000.0
     
     @staticmethod
     def cell_voltage_from_raw(raw_value: int) -> float:
         """
         Convert raw cell voltage value to actual voltage
         
-        Formula: Cell voltage = (raw_value x 0.19073) / 1000
+        Formula (Version 0.4): Cell voltage = raw_value / 1000
+        Example: 0x1387 (4999) / 1000 = 4.999V
         
         Args:
             raw_value: Raw 16-bit value from BMS (0x0000 to 0xFFFF)
@@ -357,16 +372,15 @@ class DataConverter:
         Returns:
             Cell voltage in volts
         """
-        return (raw_value * 0.19073) / 1000.0
+        return raw_value / 1000.0
     
     @staticmethod
     def temperature_from_raw(raw_value: int) -> float:
         """
         Convert raw temperature value to actual temperature
         
-        Formula (Version 0.2):
-        Z = (Word data x 0.15259) / 1000
-        Zone temperature (Z) = (-2.082*Z³) + (17.434*Z²) - (68.588*Z) + 119.824
+        Formula (Version 0.4): Z = Word data / 10
+        Example: 378 / 10 = 37.8°C
         
         Args:
             raw_value: Raw 16-bit value from BMS (0x0000 to 0xFFFF)
@@ -374,8 +388,35 @@ class DataConverter:
         Returns:
             Temperature in degrees Celsius
         """
-        # First calculate Z from raw value
-        z = (raw_value * 0.15259) / 1000.0
-        # Then calculate temperature from Z
-        return (-2.082 * z**3) + (17.434 * z**2) - (68.588 * z) + 119.824
+        return raw_value / 10.0
+    
+    @staticmethod
+    def die_temperature_from_raw(raw_value: int) -> float:
+        """
+        Convert raw die temperature value to actual temperature (Version 0.3)
+        
+        Die temperature value is in 2's complement format, range: -32768 to 32767
+        
+        Formula: Die temperature = Word data / 10
+        
+        If ((Word data & 0x8000) == 0x8000)
+            Word data = ~Word data + 1
+            Word data = Word data & 0x7FFF
+            Die temperature = (-1)(Word data) / 10 °C
+        Else
+            Die temperature = (Word data) / 10 °C
+        
+        Args:
+            raw_value: Raw 16-bit value from BMS (2's complement)
+            
+        Returns:
+            Die temperature in degrees Celsius
+        """
+        # Check if negative (MSB set)
+        if (raw_value & 0x8000) == 0x8000:
+            # Negative value - convert from 2's complement
+            raw_value = (~raw_value + 1) & 0x7FFF
+            return -1.0 * raw_value / 10.0
+        else:
+            return raw_value / 10.0
 

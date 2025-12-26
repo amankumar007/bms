@@ -62,6 +62,8 @@ class BMSConnection(QObject):
             True if connection successful, False otherwise
         """
         try:
+            self.logger.log_bms("INFO", f"Attempting to open serial port: {port}")
+            
             self.serial_connection = serial.Serial(
                 port=port,
                 baudrate=self.baud_rate,
@@ -76,22 +78,33 @@ class BMSConnection(QObject):
             time.sleep(0.1)
             
             if self.serial_connection.is_open:
-                self.is_connected = True
-                self.consecutive_failures = 0  # Reset failure counter on successful connection
-                self.connection_status_changed.emit(True)
-                self.logger.log_bms("INFO", f"Connected to BMS on port {port} at {self.baud_rate} baud")
+                self.logger.log_bms("INFO", f"Serial port {port} opened at {self.baud_rate} baud")
                 
-                # Start communication with BMS
-                self.start_communication()
-                
-                # Start periodic data updates
-                self.update_timer.start(self.update_interval)
-                
-                return True
+                # Try to start communication with BMS - verify BMS is actually present
+                self.logger.log_bms("INFO", "Sending start communication command to BMS...")
+                if self.start_communication():
+                    # BMS responded - connection is valid
+                    self.is_connected = True
+                    self.consecutive_failures = 0
+                    self.connection_status_changed.emit(True)
+                    self.logger.log_bms("INFO", f"Successfully connected to BMS on port {port}")
+                    
+                    # Start periodic data updates
+                    self.update_timer.start(self.update_interval)
+                    
+                    return True
+                else:
+                    # BMS did not respond - close connection
+                    self.logger.log_bms("WARNING", f"No response from BMS on port {port} - closing connection")
+                    self.serial_connection.close()
+                    self.serial_connection = None
+                    self.connection_error.emit(f"No response from BMS on {port}")
+                    return False
             else:
                 raise Exception(f"Failed to open serial connection to {port}")
                 
         except Exception as e:
+            self.logger.log_bms("ERROR", f"Connection error: {e}")
             self.connection_error.emit(str(e))
             return False
     
@@ -129,12 +142,15 @@ class BMSConnection(QObject):
             ModbusRTU.ADDR_COMM_START,
             0xAAAA  # Communication start
         )
-        self.logger.log_bms("DEBUG", f"Sending command: Start Communication (0xAAAA)")
+        # Log at INFO level so command is visible
+        cmd_hex = ' '.join([f'{b:02X}' for b in command])
+        self.logger.log_bms("INFO", f"TX Start Communication: {cmd_hex}")
+        
         result = self._send_command_with_retry(command) is not None
         if result:
-            self.logger.log_bms("INFO", "Communication started successfully")
+            self.logger.log_bms("INFO", "BMS responded - Communication started successfully")
         else:
-            self.logger.log_bms("ERROR", "Failed to start communication")
+            self.logger.log_bms("WARNING", "No response from BMS - Start communication failed")
         return result
     
     def stop_communication(self) -> bool:
@@ -144,7 +160,7 @@ class BMSConnection(QObject):
         Returns:
             True if successful, False otherwise
         """
-        if not self.is_connected:
+        if not self.serial_connection or not self.serial_connection.is_open:
             return False
         
         command = ModbusRTU.build_write_command(
@@ -152,7 +168,10 @@ class BMSConnection(QObject):
             ModbusRTU.ADDR_COMM_START,
             0xA5A5  # Communication stop
         )
-        self.logger.log_bms("DEBUG", f"Sending command: Stop Communication (0xA5A5)")
+        # Log at INFO level so command is visible
+        cmd_hex = ' '.join([f'{b:02X}' for b in command])
+        self.logger.log_bms("INFO", f"TX Stop Communication: {cmd_hex}")
+        
         result = self._send_command_with_retry(command) is not None
         if result:
             self.logger.log_bms("INFO", "Communication stopped successfully")
@@ -440,6 +459,115 @@ class BMSConnection(QObject):
             state = struct.unpack('>H', response['data'])[0]
             self.logger.log_bms("DEBUG", f"Balancing state for device {device_id}: 0x{state:04X}")
             return state
+        return None
+    
+    def read_die_temperature_1(self, device_id: int = ModbusRTU.DEVICE_MASTER) -> Optional[float]:
+        """
+        Read Die Temperature 1 from BMS (Version 0.3)
+        
+        Args:
+            device_id: Device ID (0x01 for Master, 0x02 for Slave-1, etc.)
+            
+        Returns:
+            Die temperature 1 in degrees Celsius or None if failed
+        """
+        command = ModbusRTU.build_read_command(
+            device_id,
+            ModbusRTU.ADDR_DIE_TEMP_1,  # Address 0x0C
+            0x0001  # Read 1 word
+        )
+        self.logger.log_bms("DEBUG", f"Reading die temperature 1: device={device_id}")
+        response = self._send_command_with_retry(command)
+        
+        if response and 'data' in response and len(response['data']) >= 2:
+            raw_value = struct.unpack('>H', response['data'])[0]
+            temperature = DataConverter.die_temperature_from_raw(raw_value)
+            self.logger.log_bms("DEBUG", f"Die temperature 1 for device {device_id}: {temperature:.1f}°C")
+            return temperature
+        return None
+    
+    def read_die_temperature_2(self, device_id: int = ModbusRTU.DEVICE_MASTER) -> Optional[float]:
+        """
+        Read Die Temperature 2 from BMS (Version 0.3)
+        
+        Args:
+            device_id: Device ID (0x01 for Master, 0x02 for Slave-1, etc.)
+            
+        Returns:
+            Die temperature 2 in degrees Celsius or None if failed
+        """
+        command = ModbusRTU.build_read_command(
+            device_id,
+            ModbusRTU.ADDR_DIE_TEMP_2,  # Address 0x0D
+            0x0001  # Read 1 word
+        )
+        self.logger.log_bms("DEBUG", f"Reading die temperature 2: device={device_id}")
+        response = self._send_command_with_retry(command)
+        
+        if response and 'data' in response and len(response['data']) >= 2:
+            raw_value = struct.unpack('>H', response['data'])[0]
+            temperature = DataConverter.die_temperature_from_raw(raw_value)
+            self.logger.log_bms("DEBUG", f"Die temperature 2 for device {device_id}: {temperature:.1f}°C")
+            return temperature
+        return None
+    
+    def read_all_data(self, device_id: int = ModbusRTU.DEVICE_MASTER) -> Optional[dict]:
+        """
+        Read all BMS data using common command (Version 0.4)
+        
+        Reads: Pack Voltage (2 bytes) + Current (4 bytes) + Cell Voltages (32 bytes) + Temperatures (8 bytes)
+        Total: 46 bytes (23 words)
+        
+        Args:
+            device_id: Device ID (0x01 for Master, 0x02 for Slave-1, etc.)
+            
+        Returns:
+            Dictionary with all data or None if failed
+        """
+        command = ModbusRTU.build_read_command(
+            device_id,
+            ModbusRTU.ADDR_PACK_VOLTAGE,  # Starting address 0x04
+            ModbusRTU.COMMON_READ_WORD_COUNT  # 0x0017 = 23 words
+        )
+        self.logger.log_bms("DEBUG", f"Reading all data (common command): device={device_id}")
+        response = self._send_command_with_retry(command)
+        
+        if response and 'data' in response and len(response['data']) >= 46:
+            try:
+                data = response['data']
+                result = {}
+                
+                # Pack Voltage: bytes 0-1 (2 bytes)
+                raw_voltage = struct.unpack('>H', data[0:2])[0]
+                result['pack_voltage'] = DataConverter.voltage_from_raw(raw_voltage)
+                
+                # Pack Current: bytes 2-5 (4 bytes, but only 3 bytes used as 24-bit value)
+                raw_current = struct.unpack('>I', data[2:6])[0]
+                raw_current = raw_current & 0xFFFFFF  # Mask to 24 bits
+                result['pack_current'] = DataConverter.current_from_raw(raw_current)
+                
+                # Cell Voltages: bytes 6-37 (32 bytes = 16 x 2 bytes)
+                result['cell_voltages'] = []
+                for i in range(16):
+                    offset = 6 + (i * 2)
+                    raw_cell = struct.unpack('>H', data[offset:offset+2])[0]
+                    result['cell_voltages'].append(DataConverter.cell_voltage_from_raw(raw_cell))
+                
+                # Temperatures: bytes 38-45 (8 bytes = 4 x 2 bytes)
+                result['temperatures'] = []
+                for i in range(4):
+                    offset = 38 + (i * 2)
+                    raw_temp = struct.unpack('>H', data[offset:offset+2])[0]
+                    result['temperatures'].append(DataConverter.temperature_from_raw(raw_temp))
+                
+                self.logger.log_bms("DEBUG", 
+                    f"All data for device {device_id}: V={result['pack_voltage']:.3f}V, "
+                    f"I={result['pack_current']:.3f}A, cells={len(result['cell_voltages'])}, "
+                    f"temps={len(result['temperatures'])}")
+                
+                return result
+            except Exception as e:
+                self.logger.log_bms("ERROR", f"Error parsing common read response: {e}")
         return None
     
     def send_debug_command(self, command_bytes: bytes) -> Optional[bytes]:
