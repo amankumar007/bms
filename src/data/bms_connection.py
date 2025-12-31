@@ -44,7 +44,8 @@ class BMSConnection(QObject):
         self.pack_current = 0.0
         self.master_cell_voltages: List[float] = []
         self.master_temperatures: List[float] = []
-        self.slave_data: Dict[int, Dict] = {}  # {slave_id: {voltages: [], temperatures: []}}
+        self.master_die_temps: List[float] = [0.0, 0.0]  # Die Temp 1, Die Temp 2
+        self.slave_data: Dict[int, Dict] = {}  # {slave_id: {voltages: [], temperatures: [], die_temps: []}}
         
         # Update timer
         self.update_timer = QTimer()
@@ -197,7 +198,16 @@ class BMSConnection(QObject):
         )
         response = self._send_command_with_retry(command)
         if response:
+            old_num_slaves = self.num_slaves
             self.num_slaves = num_slaves
+            
+            # Clear data for slaves that are no longer configured
+            if num_slaves < old_num_slaves:
+                for slave_num in range(num_slaves + 1, old_num_slaves + 1):
+                    slave_id = ModbusRTU.get_slave_device_id(slave_num)
+                    if slave_id in self.slave_data:
+                        del self.slave_data[slave_id]
+            
             return True
         return False
     
@@ -718,33 +728,68 @@ class BMSConnection(QObject):
         if not self.is_connected:
             return
         
-        # Read Master BMS data
-        voltage = self.read_pack_voltage()
-        current = self.read_pack_current()
-        cell_voltages = self.read_cell_voltages(ModbusRTU.DEVICE_MASTER)
-        temperatures = self.read_temperatures(ModbusRTU.DEVICE_MASTER)
+        # Read Master BMS data using single common command (instead of 4 separate commands)
+        master_data = self.read_all_data(ModbusRTU.DEVICE_MASTER)
+        if master_data:
+            self.pack_voltage = master_data.get('pack_voltage', 0.0)
+            self.pack_current = master_data.get('pack_current', 0.0)
+            self.master_cell_voltages = master_data.get('cell_voltages', [])
+            self.master_temperatures = master_data.get('temperatures', [])
+        
+        # Read Master Die Temperatures (still separate commands as not included in common read)
+        die_temp_1 = self.read_die_temperature_1(ModbusRTU.DEVICE_MASTER)
+        die_temp_2 = self.read_die_temperature_2(ModbusRTU.DEVICE_MASTER)
+        if die_temp_1 is not None:
+            self.master_die_temps[0] = die_temp_1
+        if die_temp_2 is not None:
+            self.master_die_temps[1] = die_temp_2
         
         # Read Slave BMS data (Slave 1 = 0x02, Slave 2 = 0x03, ..., up to Slave 35 = 0x24)
         for slave_num in range(1, min(self.num_slaves + 1, ModbusRTU.MAX_SLAVES + 1)):
             slave_id = ModbusRTU.get_slave_device_id(slave_num)
-            self.read_cell_voltages(slave_id)
-            self.read_temperatures(slave_id)
+            
+            # Use common command for slave data (cell voltages + temperatures in one command)
+            slave_data = self.read_all_data(slave_id)
+            if slave_data:
+                if slave_id not in self.slave_data:
+                    self.slave_data[slave_id] = {'voltages': [], 'temperatures': [], 'die_temps': [0.0, 0.0]}
+                self.slave_data[slave_id]['voltages'] = slave_data.get('cell_voltages', [])
+                self.slave_data[slave_id]['temperatures'] = slave_data.get('temperatures', [])
+            
+            # Read Slave Die Temperatures (still separate commands)
+            slave_die_1 = self.read_die_temperature_1(slave_id)
+            slave_die_2 = self.read_die_temperature_2(slave_id)
+            if slave_id in self.slave_data:
+                if 'die_temps' not in self.slave_data[slave_id]:
+                    self.slave_data[slave_id]['die_temps'] = [0.0, 0.0]
+                if slave_die_1 is not None:
+                    self.slave_data[slave_id]['die_temps'][0] = slave_die_1
+                if slave_die_2 is not None:
+                    self.slave_data[slave_id]['die_temps'][1] = slave_die_2
         
         # Always emit data signal, even if some reads failed (use stored values)
         # This ensures UI updates with latest available data
+        # Only include slave data for configured number of slaves
+        configured_slave_ids = set(ModbusRTU.get_slave_device_id(i) for i in range(1, self.num_slaves + 1))
+        
         data = {
             'pack_voltage': self.pack_voltage,
             'pack_current': self.pack_current,
             'master_cell_voltages': self.master_cell_voltages.copy() if self.master_cell_voltages else [],
             'master_temperatures': self.master_temperatures.copy() if self.master_temperatures else [],
-            'slave_data': {k: {'voltages': v['voltages'].copy(), 'temperatures': v['temperatures'].copy()} 
-                          for k, v in self.slave_data.items()}
+            'master_die_temps': self.master_die_temps.copy(),
+            'slave_data': {k: {
+                'voltages': v['voltages'].copy(), 
+                'temperatures': v['temperatures'].copy(),
+                'die_temps': v.get('die_temps', [0.0, 0.0]).copy()
+            } for k, v in self.slave_data.items() if k in configured_slave_ids}
         }
         
         # Log data update
         self.logger.log_bms("DEBUG", 
             f"Emitting data: V={data['pack_voltage']:.3f}V, I={data['pack_current']:.3f}A, "
-            f"Cells={len(data['master_cell_voltages'])}, Temps={len(data['master_temperatures'])}")
+            f"Cells={len(data['master_cell_voltages'])}, Temps={len(data['master_temperatures'])}, "
+            f"DieTmps={data['master_die_temps']}")
         
         self.data_received.emit(data)
     

@@ -438,11 +438,24 @@ class MainWindow(QMainWindow):
     
     def on_num_slaves_changed(self, num_slaves: int):
         """Handle number of slaves changed"""
+        old_num_slaves = self.num_slaves
         self.num_slaves = num_slaves
         self.update_top_status_bar()
         
         # Always update the bms_connection's num_slaves (even if not connected yet)
+        old_bms_slaves = self.bms_connection.num_slaves
         self.bms_connection.num_slaves = num_slaves
+        
+        # Clear data for slaves that are no longer configured
+        if num_slaves < old_bms_slaves:
+            from src.protocol.modbus_rtu import ModbusRTU
+            for slave_num in range(num_slaves + 1, old_bms_slaves + 1):
+                slave_id = ModbusRTU.get_slave_device_id(slave_num)
+                if slave_id in self.bms_connection.slave_data:
+                    del self.bms_connection.slave_data[slave_id]
+        
+        # Update plot page slave tabs
+        self.plot_page.update_slave_count(num_slaves)
         
         if self.bms_connection.is_connected:
             self.logger.log_app("INFO", f"Setting number of slaves to {num_slaves}")
@@ -489,17 +502,20 @@ class MainWindow(QMainWindow):
         if current_device == 1:  # Master BMS
             voltages = data.get('master_cell_voltages', [])
             temperatures = data.get('master_temperatures', [])
+            die_temps = data.get('master_die_temps', [])
         else:  # Slave BMS
             slave_data = data.get('slave_data', {})
             if current_device in slave_data:
                 voltages = slave_data[current_device].get('voltages', [])
                 temperatures = slave_data[current_device].get('temperatures', [])
+                die_temps = slave_data[current_device].get('die_temps', [])
             else:
                 voltages = []
                 temperatures = []
+                die_temps = []
         
         self.balancing_page.update_cell_voltages(voltages)
-        self.balancing_page.update_temperatures(temperatures)
+        self.balancing_page.update_temperatures(temperatures, die_temps)
         
         # Update status bar with latest voltage/current
         voltage = data.get('pack_voltage', 0.0)

@@ -316,8 +316,8 @@ class MasterPage(QWidget):
         temp_group.setMinimumWidth(200)
         temp_group.setMaximumWidth(280)
         temp_layout = QVBoxLayout(temp_group)
-        temp_layout.setSpacing(10)
-        temp_layout.setContentsMargins(12, 15, 12, 12)
+        temp_layout.setSpacing(8)
+        temp_layout.setContentsMargins(12, 12, 12, 12)
         
         tab.temp_labels = []
         temp_colors = ['#FF4444', '#FF8844', '#FFFF44', '#44FFFF']
@@ -325,33 +325,68 @@ class MasterPage(QWidget):
         
         for i in range(4):
             temp_frame = QFrame()
-            temp_frame.setMinimumHeight(65)
+            temp_frame.setMinimumHeight(50)
             temp_frame.setStyleSheet(f"""
                 QFrame {{
                     background-color: rgb(30, 50, 45);
                     border: 2px solid {temp_colors[i]};
-                    border-radius: 8px;
-                    padding: 8px;
+                    border-radius: 6px;
+                    padding: 4px;
                 }}
             """)
             temp_frame_layout = QHBoxLayout(temp_frame)
-            temp_frame_layout.setSpacing(10)
-            temp_frame_layout.setContentsMargins(12, 8, 12, 8)
+            temp_frame_layout.setSpacing(8)
+            temp_frame_layout.setContentsMargins(10, 5, 10, 5)
             
             zone_label = QLabel(temp_names[i])
-            zone_label.setStyleSheet(f"color: {temp_colors[i]}; font-weight: bold; font-size: 13px;")
+            zone_label.setStyleSheet(f"color: {temp_colors[i]}; font-weight: bold; font-size: 12px;")
             zone_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
             temp_frame_layout.addWidget(zone_label)
             
             temp_frame_layout.addStretch()
             
             temp_value = QLabel("-- °C")
-            temp_value.setStyleSheet("font-size: 18px; font-weight: bold; color: white;")
+            temp_value.setStyleSheet("font-size: 14px; font-weight: bold; color: white;")
             temp_value.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             temp_frame_layout.addWidget(temp_value)
             
             tab.temp_labels.append(temp_value)
             temp_layout.addWidget(temp_frame)
+        
+        # IC Die Temperatures (Die 1 and Die 2)
+        die_temp_colors = ['#AA88FF', '#88AAFF']  # Purple shades for die temps
+        die_temp_names = ['Die 1', 'Die 2']
+        tab.die_temp_labels = []
+        
+        for i in range(2):
+            die_frame = QFrame()
+            die_frame.setMinimumHeight(50)
+            die_frame.setStyleSheet(f"""
+                QFrame {{
+                    background-color: rgb(35, 35, 55);
+                    border: 2px solid {die_temp_colors[i]};
+                    border-radius: 6px;
+                    padding: 4px;
+                }}
+            """)
+            die_frame_layout = QHBoxLayout(die_frame)
+            die_frame_layout.setSpacing(8)
+            die_frame_layout.setContentsMargins(10, 5, 10, 5)
+            
+            die_label = QLabel(die_temp_names[i])
+            die_label.setStyleSheet(f"color: {die_temp_colors[i]}; font-weight: bold; font-size: 12px;")
+            die_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+            die_frame_layout.addWidget(die_label)
+            
+            die_frame_layout.addStretch()
+            
+            die_value = QLabel("-- °C")
+            die_value.setStyleSheet("font-size: 14px; font-weight: bold; color: white;")
+            die_value.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            die_frame_layout.addWidget(die_value)
+            
+            tab.die_temp_labels.append(die_value)
+            temp_layout.addWidget(die_frame)
         
         temp_layout.addStretch()
         data_section.addWidget(temp_group, stretch=1)
@@ -434,6 +469,16 @@ class MasterPage(QWidget):
         if hasattr(self.master_tab, 'pack_current_label'):
             self.master_tab.pack_current_label.setText(f"Pack Current: {pack_current:.3f} A")
         
+        # Master Die Temperatures
+        master_die_temps = data.get('master_die_temps', [0.0, 0.0])
+        if hasattr(self.master_tab, 'die_temp_labels'):
+            for i, label in enumerate(self.master_tab.die_temp_labels):
+                if i < len(master_die_temps):
+                    die_temp = master_die_temps[i]
+                    color = "#FF4444" if die_temp > 80 else ("#FFFF44" if die_temp > 60 else "#44FF44")
+                    label.setText(f"{die_temp:.1f} °C")
+                    label.setStyleSheet(f"font-size: 14px; font-weight: bold; color: {color};")
+        
         # Master cell voltages - update battery widgets
         master_voltages = data.get('master_cell_voltages', [])
         if hasattr(self.master_tab, 'battery_widgets'):
@@ -455,16 +500,26 @@ class MasterPage(QWidget):
                 else:
                     color = "#44FF44"
                 label.setText(f"{temp:.1f} °C")
-                label.setStyleSheet(f"font-size: 18px; font-weight: bold; color: {color};")
+                label.setStyleSheet(f"font-size: 14px; font-weight: bold; color: {color};")
             else:
                 label.setText("-- °C")
-                label.setStyleSheet("font-size: 18px; font-weight: bold; color: white;")
+                label.setStyleSheet("font-size: 14px; font-weight: bold; color: white;")
         
         # Update slave tabs
         slave_data = data.get('slave_data', {})
         for slave_id, tab in self.slave_tabs.items():
             if slave_id in slave_data:
                 slave_info = slave_data[slave_id]
+                
+                # Slave Die Temperatures
+                slave_die_temps = slave_info.get('die_temps', [0.0, 0.0])
+                if hasattr(tab, 'die_temp_labels'):
+                    for i, label in enumerate(tab.die_temp_labels):
+                        if i < len(slave_die_temps):
+                            die_temp = slave_die_temps[i]
+                            color = "#FF4444" if die_temp > 80 else ("#FFFF44" if die_temp > 60 else "#44FF44")
+                            label.setText(f"{die_temp:.1f} °C")
+                            label.setStyleSheet(f"font-size: 14px; font-weight: bold; color: {color};")
                 
                 # Voltages - update battery widgets
                 voltages = slave_info.get('voltages', [])
@@ -487,15 +542,19 @@ class MasterPage(QWidget):
                         else:
                             color = "#44FF44"
                         label.setText(f"{temp:.1f} °C")
-                        label.setStyleSheet(f"font-size: 18px; font-weight: bold; color: {color};")
+                        label.setStyleSheet(f"font-size: 14px; font-weight: bold; color: {color};")
                     else:
                         label.setText("-- °C")
-                        label.setStyleSheet("font-size: 18px; font-weight: bold; color: white;")
+                        label.setStyleSheet("font-size: 14px; font-weight: bold; color: white;")
             else:
                 # No data - reset to default
+                if hasattr(tab, 'die_temp_labels'):
+                    for label in tab.die_temp_labels:
+                        label.setText("-- °C")
+                        label.setStyleSheet("font-size: 14px; font-weight: bold; color: white;")
                 if hasattr(tab, 'battery_widgets'):
                     for battery in tab.battery_widgets:
                         battery.set_voltage(0.0)
                 for label in tab.temp_labels:
                     label.setText("-- °C")
-                    label.setStyleSheet("font-size: 18px; font-weight: bold; color: #888;")
+                    label.setStyleSheet("font-size: 14px; font-weight: bold; color: #888;")

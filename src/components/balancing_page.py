@@ -58,26 +58,19 @@ class BatteryWidget(QWidget):
         tip_height = 5
         tip_width = int(battery_width * 0.4)
         
-        # Determine color based on balancing status and voltage
-        if self.is_balancing:
-            fill_color = QColor(50, 150, 255)  # Blue for balancing
-            border_color = QColor(100, 180, 255)
-            text_color = QColor(100, 200, 255)
-        elif self.voltage <= 2.0:
+        # Determine color based on voltage only (same for all cells)
+        border_color = QColor(100, 100, 100)
+        if self.voltage <= 2.0:
             fill_color = QColor(255, 50, 50)  # Red
-            border_color = QColor(100, 100, 100)
             text_color = QColor(255, 100, 100)
         elif self.voltage <= 2.8:
             fill_color = QColor(255, 150, 50)  # Orange
-            border_color = QColor(100, 100, 100)
             text_color = QColor(255, 200, 100)
         elif self.voltage <= 3.2:
             fill_color = QColor(255, 255, 50)  # Yellow
-            border_color = QColor(100, 100, 100)
             text_color = QColor(255, 255, 100)
         else:
             fill_color = QColor(50, 255, 50)  # Green
-            border_color = QColor(100, 100, 100)
             text_color = QColor(100, 255, 100)
         
         # Draw battery tip (positive terminal at top)
@@ -311,8 +304,8 @@ class BalancingPage(QWidget):
         temp_group.setMinimumWidth(200)
         temp_group.setMaximumWidth(280)
         temp_layout = QVBoxLayout(temp_group)
-        temp_layout.setSpacing(10)
-        temp_layout.setContentsMargins(12, 15, 12, 12)
+        temp_layout.setSpacing(8)
+        temp_layout.setContentsMargins(12, 12, 12, 12)
         
         self.temp_labels = []
         temp_colors = ['#FF4444', '#FF8844', '#FFFF44', '#44FFFF']
@@ -320,33 +313,68 @@ class BalancingPage(QWidget):
         
         for i in range(4):
             temp_frame = QFrame()
-            temp_frame.setMinimumHeight(65)
+            temp_frame.setMinimumHeight(50)
             temp_frame.setStyleSheet(f"""
                 QFrame {{
                     background-color: rgb(30, 50, 45);
                     border: 2px solid {temp_colors[i]};
-                    border-radius: 8px;
-                    padding: 8px;
+                    border-radius: 6px;
+                    padding: 4px;
                 }}
             """)
             temp_frame_layout = QHBoxLayout(temp_frame)
-            temp_frame_layout.setSpacing(10)
-            temp_frame_layout.setContentsMargins(12, 8, 12, 8)
+            temp_frame_layout.setSpacing(8)
+            temp_frame_layout.setContentsMargins(10, 5, 10, 5)
             
             zone_label = QLabel(temp_names[i])
-            zone_label.setStyleSheet(f"color: {temp_colors[i]}; font-weight: bold; font-size: 13px;")
+            zone_label.setStyleSheet(f"color: {temp_colors[i]}; font-weight: bold; font-size: 12px;")
             zone_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
             temp_frame_layout.addWidget(zone_label)
             
             temp_frame_layout.addStretch()
             
             temp_value = QLabel("-- °C")
-            temp_value.setStyleSheet("font-size: 18px; font-weight: bold; color: white;")
+            temp_value.setStyleSheet("font-size: 14px; font-weight: bold; color: white;")
             temp_value.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             temp_frame_layout.addWidget(temp_value)
             
             self.temp_labels.append(temp_value)
             temp_layout.addWidget(temp_frame)
+        
+        # IC Die Temperatures (Die 1 and Die 2)
+        die_temp_colors = ['#AA88FF', '#88AAFF']  # Purple shades for die temps
+        die_temp_names = ['Die 1', 'Die 2']
+        self.die_temp_labels = []
+        
+        for i in range(2):
+            die_frame = QFrame()
+            die_frame.setMinimumHeight(50)
+            die_frame.setStyleSheet(f"""
+                QFrame {{
+                    background-color: rgb(35, 35, 55);
+                    border: 2px solid {die_temp_colors[i]};
+                    border-radius: 6px;
+                    padding: 4px;
+                }}
+            """)
+            die_frame_layout = QHBoxLayout(die_frame)
+            die_frame_layout.setSpacing(8)
+            die_frame_layout.setContentsMargins(10, 5, 10, 5)
+            
+            die_label = QLabel(die_temp_names[i])
+            die_label.setStyleSheet(f"color: {die_temp_colors[i]}; font-weight: bold; font-size: 12px;")
+            die_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+            die_frame_layout.addWidget(die_label)
+            
+            die_frame_layout.addStretch()
+            
+            die_value = QLabel("-- °C")
+            die_value.setStyleSheet("font-size: 14px; font-weight: bold; color: white;")
+            die_value.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            die_frame_layout.addWidget(die_value)
+            
+            self.die_temp_labels.append(die_value)
+            temp_layout.addWidget(die_frame)
         
         temp_layout.addStretch()
         viz_section.addWidget(temp_group, stretch=1)
@@ -444,8 +472,9 @@ class BalancingPage(QWidget):
             else:
                 battery.set_voltage(0.0)
     
-    def update_temperatures(self, temperatures: list):
-        """Update temperature values"""
+    def update_temperatures(self, temperatures: list, die_temperatures: list = None):
+        """Update temperature values including die temperatures"""
+        # Zone temperatures
         for i, label in enumerate(self.temp_labels):
             if i < len(temperatures):
                 temp = temperatures[i]
@@ -456,7 +485,19 @@ class BalancingPage(QWidget):
                 else:
                     color = "#44FF44"
                 label.setText(f"{temp:.1f} °C")
-                label.setStyleSheet(f"font-size: 18px; font-weight: bold; color: {color};")
+                label.setStyleSheet(f"font-size: 14px; font-weight: bold; color: {color};")
             else:
                 label.setText("-- °C")
-                label.setStyleSheet("font-size: 18px; font-weight: bold; color: white;")
+                label.setStyleSheet("font-size: 14px; font-weight: bold; color: white;")
+        
+        # Die temperatures
+        if die_temperatures and hasattr(self, 'die_temp_labels'):
+            for i, label in enumerate(self.die_temp_labels):
+                if i < len(die_temperatures):
+                    die_temp = die_temperatures[i]
+                    color = "#FF4444" if die_temp > 80 else ("#FFFF44" if die_temp > 60 else "#44FF44")
+                    label.setText(f"{die_temp:.1f} °C")
+                    label.setStyleSheet(f"font-size: 14px; font-weight: bold; color: {color};")
+                else:
+                    label.setText("-- °C")
+                    label.setStyleSheet("font-size: 14px; font-weight: bold; color: white;")

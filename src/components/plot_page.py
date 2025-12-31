@@ -48,10 +48,12 @@ class PlotPage(QWidget):
         
         # Track known slaves
         self.known_slaves = set()
+        self.configured_slave_count = 0  # Maximum number of slaves to show
         
         # Graph widgets storage {device_id: {'voltage': widget, 'current': widget, 'temp': widget}}
         self.graph_widgets = {}
         self._graph_initialized = {}
+        self._page_loaded = {}  # Track which widgets have finished loading
         
         # Update timer
         self._update_timer = QTimer()
@@ -215,7 +217,7 @@ class PlotPage(QWidget):
         voltage_toggle_layout.addStretch()
         voltage_layout.addWidget(voltage_toggle_frame)
         
-        voltage_graph = self._create_graph_widget()
+        voltage_graph = self._create_graph_widget(device_id, 'voltage')
         voltage_layout.addWidget(voltage_graph, 1)  # stretch factor = 1 to take remaining space
         self.graph_widgets[device_id]['voltage'] = voltage_graph
         self._graph_initialized[device_id] = {'voltage': False}
@@ -224,7 +226,7 @@ class PlotPage(QWidget):
         
         # Current Graph Tab (only for Master)
         if is_master:
-            current_widget = self._create_graph_widget()
+            current_widget = self._create_graph_widget(device_id, 'current')
             graph_tabs.addTab(current_widget, "🔋 Pack V & Current")
             self.graph_widgets[device_id]['current'] = current_widget
             self._graph_initialized[device_id]['current'] = False
@@ -278,7 +280,7 @@ class PlotPage(QWidget):
         temp_toggle_layout.addStretch()
         temp_layout.addWidget(temp_toggle_frame)
         
-        temp_graph = self._create_graph_widget()
+        temp_graph = self._create_graph_widget(device_id, 'temp')
         temp_layout.addWidget(temp_graph, 1)  # stretch factor = 1 to take remaining space
         self.graph_widgets[device_id]['temp'] = temp_graph
         self._graph_initialized[device_id]['temp'] = False
@@ -299,12 +301,22 @@ class PlotPage(QWidget):
         if device_id in self._graph_initialized and graph_type in self._graph_initialized[device_id]:
             self._graph_initialized[device_id][graph_type] = False
     
-    def _create_graph_widget(self) -> QWebEngineView:
+    def _create_graph_widget(self, device_id: int, graph_type: str) -> QWebEngineView:
         """Create a graph widget with Plotly base HTML"""
         widget = QWebEngineView()
         widget.setMinimumHeight(200)
         from PyQt6.QtWidgets import QSizePolicy
         widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        
+        # Track page load status
+        widget_key = f"{device_id}_{graph_type}"
+        self._page_loaded[widget_key] = False
+        
+        def on_load_finished(ok):
+            if ok:
+                self._page_loaded[widget_key] = True
+        
+        widget.loadFinished.connect(on_load_finished)
         
         base_html = """
         <!DOCTYPE html>
@@ -333,8 +345,23 @@ class PlotPage(QWidget):
             <div id="plot" style="display: none;"></div>
             <script>
                 var plotInitialized = false;
+                var plotlyReady = false;
+                
+                // Check if Plotly is loaded
+                function checkPlotly() {
+                    if (typeof Plotly !== 'undefined') {
+                        plotlyReady = true;
+                    } else {
+                        setTimeout(checkPlotly, 100);
+                    }
+                }
+                checkPlotly();
                 
                 function initPlot(data, layout) {
+                    if (!plotlyReady) {
+                        setTimeout(function() { initPlot(data, layout); }, 100);
+                        return;
+                    }
                     document.getElementById('waiting').style.display = 'none';
                     document.getElementById('plot').style.display = 'block';
                     Plotly.newPlot('plot', data, layout, {
@@ -345,7 +372,7 @@ class PlotPage(QWidget):
                 }
                 
                 function updatePlotData(newData) {
-                    if (!plotInitialized) return;
+                    if (!plotInitialized || !plotlyReady) return;
                     var plotDiv = document.getElementById('plot');
                     if (!plotDiv || !plotDiv.data) return;
                     
@@ -372,6 +399,49 @@ class PlotPage(QWidget):
         slave_num = slave_id - 1  # Slave 1 = device_id 2
         name = f"Slave {slave_num}"
         self._create_device_tab(slave_id, name, is_master=False)
+    
+    def _remove_slave_tab(self, slave_id: int):
+        """Remove a slave BMS tab"""
+        if slave_id not in self.known_slaves:
+            return
+        
+        # Find and remove the tab
+        slave_num = slave_id - 1
+        tab_name = f"Slave {slave_num}"
+        
+        for i in range(self.device_tabs.count()):
+            if self.device_tabs.tabText(i) == tab_name:
+                self.device_tabs.removeTab(i)
+                break
+        
+        # Clean up tracking data
+        self.known_slaves.discard(slave_id)
+        
+        # Remove graph widgets
+        if slave_id in self.graph_widgets:
+            del self.graph_widgets[slave_id]
+        
+        # Remove initialization flags
+        if slave_id in self._graph_initialized:
+            del self._graph_initialized[slave_id]
+        
+        # Remove page load flags
+        for graph_type in ['voltage', 'current', 'temp']:
+            widget_key = f"{slave_id}_{graph_type}"
+            if widget_key in self._page_loaded:
+                del self._page_loaded[widget_key]
+    
+    def update_slave_count(self, num_slaves: int):
+        """Update slave tabs based on the configured number of slaves"""
+        self.configured_slave_count = num_slaves
+        
+        # Expected slave IDs: 2, 3, 4, ... (num_slaves + 1)
+        expected_slaves = set(range(2, num_slaves + 2))
+        
+        # Remove slaves that are no longer needed
+        slaves_to_remove = self.known_slaves - expected_slaves
+        for slave_id in list(slaves_to_remove):
+            self._remove_slave_tab(slave_id)
     
     def start_recording(self):
         """Start or resume recording"""
@@ -486,9 +556,24 @@ class PlotPage(QWidget):
         for device_id in self._graph_initialized:
             for graph_type in self._graph_initialized[device_id]:
                 self._graph_initialized[device_id][graph_type] = False
+                widget_key = f"{device_id}_{graph_type}"
+                self._page_loaded[widget_key] = False
                 # Reinitialize widget HTML
                 if device_id in self.graph_widgets and graph_type in self.graph_widgets[device_id]:
                     widget = self.graph_widgets[device_id][graph_type]
+                    
+                    # Reconnect loadFinished signal
+                    def make_load_handler(key):
+                        def on_load_finished(ok):
+                            if ok:
+                                self._page_loaded[key] = True
+                        return on_load_finished
+                    
+                    try:
+                        widget.loadFinished.disconnect()
+                    except:
+                        pass
+                    widget.loadFinished.connect(make_load_handler(widget_key))
                     widget.setHtml(self._get_base_html())
     
     def _get_base_html(self):
@@ -514,14 +599,29 @@ class PlotPage(QWidget):
             <div id="plot" style="display: none;"></div>
             <script>
                 var plotInitialized = false;
+                var plotlyReady = false;
+                
+                function checkPlotly() {
+                    if (typeof Plotly !== 'undefined') {
+                        plotlyReady = true;
+                    } else {
+                        setTimeout(checkPlotly, 100);
+                    }
+                }
+                checkPlotly();
+                
                 function initPlot(data, layout) {
+                    if (!plotlyReady) {
+                        setTimeout(function() { initPlot(data, layout); }, 100);
+                        return;
+                    }
                     document.getElementById('waiting').style.display = 'none';
                     document.getElementById('plot').style.display = 'block';
                     Plotly.newPlot('plot', data, layout, {displayModeBar: true, scrollZoom: true, displaylogo: false, responsive: true});
                     plotInitialized = true;
                 }
                 function updatePlotData(newData) {
-                    if (!plotInitialized) return;
+                    if (!plotInitialized || !plotlyReady) return;
                     var plotDiv = document.getElementById('plot');
                     if (!plotDiv || !plotDiv.data) return;
                     var update = {x: [], y: []};
@@ -609,9 +709,13 @@ class PlotPage(QWidget):
         
         slave_data = data.get('slave_data', {})
         
-        # Track new slaves and create tabs
+        # Track new slaves and create tabs (only if within configured limit)
+        # Slave IDs: 2 = Slave 1, 3 = Slave 2, etc.
+        max_allowed_slave_id = self.configured_slave_count + 1  # e.g., 2 slaves means IDs 2 and 3
+        
         for slave_id in slave_data.keys():
-            if slave_id not in self.known_slaves:
+            # Only add slave tab if within configured limit
+            if slave_id <= max_allowed_slave_id and slave_id not in self.known_slaves:
                 self.known_slaves.add(slave_id)
                 self._add_slave_tab(slave_id)
                 # Backfill nulls
@@ -670,24 +774,30 @@ class PlotPage(QWidget):
         
         # Voltage graph
         if 'voltage' in widgets:
-            traces = self._build_voltage_traces(device_id, timestamps, is_master)
-            self._update_graph(widgets['voltage'], traces, initialized.get('voltage', False), 
-                             "Cell Voltages (V)", "Voltage (V)")
-            initialized['voltage'] = True
+            widget_key = f"{device_id}_voltage"
+            if self._page_loaded.get(widget_key, False):
+                traces = self._build_voltage_traces(device_id, timestamps, is_master)
+                self._update_graph(widgets['voltage'], traces, initialized.get('voltage', False), 
+                                 "Cell Voltages (V)", "Voltage (V)")
+                initialized['voltage'] = True
         
         # Current graph (Master only)
         if is_master and 'current' in widgets:
-            traces = self._build_current_traces(timestamps)
-            self._update_graph(widgets['current'], traces, initialized.get('current', False),
-                             "Pack Voltage & Current", "Value")
-            initialized['current'] = True
+            widget_key = f"{device_id}_current"
+            if self._page_loaded.get(widget_key, False):
+                traces = self._build_current_traces(timestamps)
+                self._update_graph(widgets['current'], traces, initialized.get('current', False),
+                                 "Pack Voltage & Current", "Value")
+                initialized['current'] = True
         
         # Temperature graph
         if 'temp' in widgets:
-            traces = self._build_temp_traces(device_id, timestamps, is_master)
-            self._update_graph(widgets['temp'], traces, initialized.get('temp', False),
-                             "Temperature (°C)", "Temperature (°C)")
-            initialized['temp'] = True
+            widget_key = f"{device_id}_temp"
+            if self._page_loaded.get(widget_key, False):
+                traces = self._build_temp_traces(device_id, timestamps, is_master)
+                self._update_graph(widgets['temp'], traces, initialized.get('temp', False),
+                                 "Temperature (°C)", "Temperature (°C)")
+                initialized['temp'] = True
     
     def _build_voltage_traces(self, device_id: int, timestamps: list, is_master: bool):
         """Build voltage traces for a device with high contrast colors"""
@@ -799,16 +909,23 @@ class PlotPage(QWidget):
         
         layout = {
             'title': {'text': title, 'font': {'size': 14, 'color': '#f0f8ff'}},
-            'xaxis': {'title': 'Time', 'showgrid': True, 'gridcolor': 'rgba(2, 44, 34, 0.5)'},
-            'yaxis': {'title': y_title, 'showgrid': True, 'gridcolor': 'rgba(2, 44, 34, 0.5)'},
+            'xaxis': {'title': 'Time', 'showgrid': True, 'gridcolor': 'rgba(2, 44, 34, 0.5)',
+                     'color': '#96c896', 'tickfont': {'color': '#96c896'}},
+            'yaxis': {'title': y_title, 'showgrid': True, 'gridcolor': 'rgba(2, 44, 34, 0.5)',
+                     'color': '#96c896', 'tickfont': {'color': '#96c896'}},
             'autosize': True,
             'showlegend': True,
-            'legend': {'orientation': 'v', 'x': 1.02, 'y': 1, 'font': {'size': 10},
+            'legend': {'orientation': 'v', 'x': 1.02, 'y': 1, 'font': {'size': 10, 'color': '#f0f8ff'},
                       'bgcolor': 'rgba(15, 35, 30, 0.9)'},
             'margin': {'l': 60, 'r': 150, 't': 35, 'b': 40},
             'paper_bgcolor': 'rgb(15, 35, 30)',
             'plot_bgcolor': 'rgb(25, 45, 40)',
-            'hovermode': 'x unified'
+            'hovermode': 'x unified',
+            'hoverlabel': {
+                'bgcolor': 'rgba(0, 0, 0, 0.9)',
+                'bordercolor': '#44FF44',
+                'font': {'color': '#FFFFFF', 'size': 13, 'family': 'monospace'}
+            }
         }
         
         # Add secondary y-axis for current graph
