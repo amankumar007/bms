@@ -826,8 +826,8 @@ class BMSConnection(QObject):
             desc_lower = port.description.lower() if port.description else ""
             device_lower = port.device.lower()
             
-            # Filter out Bluetooth, virtual, debug ports, and n/a entries
-            skip_keywords = ['bluetooth', 'bt ', 'rfcomm', 'virtual', 'debug', 'n/a', '(null)']
+            # Filter out Bluetooth, virtual, debug ports, and n/a entries: 'Virtual' removed from the skip_keywords array
+            skip_keywords = ['bluetooth', 'bt ', 'rfcomm', 'debug', 'n/a', '(null)']
             if any(kw in desc_lower or kw in device_lower for kw in skip_keywords):
                 continue
             
