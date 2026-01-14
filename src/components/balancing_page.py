@@ -5,9 +5,9 @@ Balancing Page Component - Cell balancing control
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, QLabel,
     QPushButton, QRadioButton, QButtonGroup, QGridLayout, QFrame,
-    QComboBox, QScrollArea, QSizePolicy
+    QComboBox, QScrollArea, QSizePolicy, QSpinBox
 )
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, pyqtSignal, QTimer
 from PyQt6.QtGui import QFont, QColor, QPalette, QPainter, QPen, QBrush
 
 
@@ -146,6 +146,7 @@ class BalancingPage(QWidget):
     # Signals
     balancing_changed = pyqtSignal(int, bool)  # device_id, enable
     balancing_sequence_changed = pyqtSignal(int, int)  # device_id, sequence
+    request_balancing_status = pyqtSignal()  # Request to read balancing status from BMS
     
     def __init__(self):
         super().__init__()
@@ -153,6 +154,12 @@ class BalancingPage(QWidget):
         self.balancing_enabled = False
         self.balancing_state = 0  # 16-bit state
         self.balancing_status = 0  # ON/OFF status (0x0000 or 0x0001)
+        self.balancing_read_interval = 2  # Default 2 seconds
+        
+        # Timer for reading balancing status (only runs when balancing is enabled)
+        self.balancing_timer = QTimer()
+        self.balancing_timer.timeout.connect(self._request_balancing_status)
+        
         self.setup_ui()
         
     def setup_ui(self):
@@ -192,12 +199,12 @@ class BalancingPage(QWidget):
         
         self.device_combo = QComboBox()
         self.device_combo.setMinimumWidth(180)
-        # Add master and all possible slaves
+        # Start with just master - slaves will be added dynamically
         self.device_combo.addItem("Master BMS", 1)
-        for i in range(35):
-            self.device_combo.addItem(f"Slave {i+1} (0x{i+2:02X})", i + 2)
         self.device_combo.currentIndexChanged.connect(self.on_device_selection_changed)
         device_layout.addWidget(self.device_combo)
+        
+        self.num_slaves = 0  # Track current number of slaves
         
         device_layout.addStretch()
         layout.addWidget(device_group)
@@ -258,17 +265,33 @@ class BalancingPage(QWidget):
         self.apply_btn.clicked.connect(self.apply_balancing_pattern)
         control_layout.addWidget(self.apply_btn)
         
-        self.enable_btn = QPushButton("Enable")
-        self.enable_btn.setMinimumHeight(30)
-        self.enable_btn.clicked.connect(self.toggle_balancing)
-        control_layout.addWidget(self.enable_btn)
-        
-        self.disable_btn = QPushButton("Disable")
-        self.disable_btn.setMinimumHeight(30)
-        self.disable_btn.clicked.connect(self.disable_balancing)
-        control_layout.addWidget(self.disable_btn)
+        # Single toggle button for Enable/Disable
+        self.toggle_btn = QPushButton("Enable Balancing")
+        self.toggle_btn.setMinimumHeight(30)
+        self.toggle_btn.setMinimumWidth(130)
+        self.toggle_btn.clicked.connect(self.toggle_balancing)
+        self._update_toggle_button_style()
+        control_layout.addWidget(self.toggle_btn)
         
         top_row.addWidget(control_group)
+        
+        # Read Frequency selector
+        freq_group = QGroupBox("Status Read Freq")
+        freq_group.setMaximumHeight(90)
+        freq_group.setMaximumWidth(150)
+        freq_layout = QHBoxLayout(freq_group)
+        freq_layout.setSpacing(5)
+        freq_layout.setContentsMargins(10, 10, 10, 10)
+        
+        self.freq_spinbox = QSpinBox()
+        self.freq_spinbox.setRange(1, 60)
+        self.freq_spinbox.setValue(2)
+        self.freq_spinbox.setSuffix(" sec")
+        self.freq_spinbox.setMinimumHeight(30)
+        self.freq_spinbox.valueChanged.connect(self.on_frequency_changed)
+        freq_layout.addWidget(self.freq_spinbox)
+        
+        top_row.addWidget(freq_group)
         top_row.addStretch()
         
         layout.addLayout(top_row)
@@ -278,9 +301,35 @@ class BalancingPage(QWidget):
         viz_section.setSpacing(10)
         
         # Battery visualization with balancing status
-        battery_group = QGroupBox("Cell Voltages & Balancing Status (● Green=ON, ● Red=OFF)")
+        battery_group = QGroupBox("Cell Voltages & Balancing Status")
         battery_layout = QVBoxLayout(battery_group)
         battery_layout.setContentsMargins(5, 10, 5, 5)
+        
+        # Legend for balancing status
+        legend_layout = QHBoxLayout()
+        legend_layout.setSpacing(15)
+        legend_layout.addStretch()
+        
+        # Green dot = ON
+        green_dot = QLabel("●")
+        green_dot.setStyleSheet("color: #32FF32; font-size: 16px;")
+        legend_layout.addWidget(green_dot)
+        green_label = QLabel("Balancing ON")
+        green_label.setStyleSheet("color: #32FF32; font-size: 11px;")
+        legend_layout.addWidget(green_label)
+        
+        legend_layout.addSpacing(20)
+        
+        # Red dot = OFF
+        red_dot = QLabel("●")
+        red_dot.setStyleSheet("color: #FF3232; font-size: 16px;")
+        legend_layout.addWidget(red_dot)
+        red_label = QLabel("Balancing OFF")
+        red_label.setStyleSheet("color: #FF3232; font-size: 11px;")
+        legend_layout.addWidget(red_label)
+        
+        legend_layout.addStretch()
+        battery_layout.addLayout(legend_layout)
         
         battery_grid = QGridLayout()
         battery_grid.setSpacing(5)
@@ -390,6 +439,39 @@ class BalancingPage(QWidget):
         self.current_device_id = device_id
         self.update_balancing_indicators()
     
+    def update_slave_count(self, num_slaves: int):
+        """Update the device combo box based on number of slaves configured"""
+        if num_slaves == self.num_slaves:
+            return  # No change
+        
+        current_device = self.device_combo.currentData()
+        
+        # Block signals to prevent triggering device_selection_changed during update
+        self.device_combo.blockSignals(True)
+        
+        # Clear all items
+        self.device_combo.clear()
+        
+        # Always add master
+        self.device_combo.addItem("Master BMS", 1)
+        
+        # Add only the configured number of slaves
+        for i in range(num_slaves):
+            self.device_combo.addItem(f"Slave {i+1} (0x{i+2:02X})", i + 2)
+        
+        self.num_slaves = num_slaves
+        
+        # Restore selection if the device still exists
+        index = self.device_combo.findData(current_device)
+        if index >= 0:
+            self.device_combo.setCurrentIndex(index)
+        else:
+            # Device no longer exists, reset to master
+            self.device_combo.setCurrentIndex(0)
+            self.current_device_id = 1
+        
+        self.device_combo.blockSignals(False)
+    
     def apply_balancing_pattern(self):
         """Apply the selected balancing pattern"""
         mode = self.mode_button_group.checkedId()
@@ -424,20 +506,68 @@ class BalancingPage(QWidget):
         """Toggle balancing on/off"""
         self.balancing_enabled = not self.balancing_enabled
         self.balancing_changed.emit(self.current_device_id, self.balancing_enabled)
+        self._update_toggle_button_style()
         
         if self.balancing_enabled:
-            self.enable_btn.setText("Disable")
-            self.enable_btn.setStyleSheet("background-color: rgb(200, 50, 50);")
+            # Start the balancing status read timer
+            self._start_balancing_timer()
         else:
-            self.enable_btn.setText("Enable")
-            self.enable_btn.setStyleSheet("")
+            # Stop the balancing status read timer
+            self._stop_balancing_timer()
+            # Set all cells to not balancing (red dots) when disabled
+            self.balancing_state = 0
+            self.update_balancing_indicators()
     
-    def disable_balancing(self):
-        """Disable balancing"""
-        self.balancing_enabled = False
-        self.balancing_changed.emit(self.current_device_id, False)
-        self.enable_btn.setText("Enable")
-        self.enable_btn.setStyleSheet("")
+    def _update_toggle_button_style(self):
+        """Update toggle button text and color based on balancing state"""
+        if self.balancing_enabled:
+            self.toggle_btn.setText("Disable Balancing")
+            self.toggle_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: rgb(200, 50, 50);
+                    color: white;
+                    font-weight: bold;
+                    border-radius: 4px;
+                }
+                QPushButton:hover {
+                    background-color: rgb(220, 70, 70);
+                }
+            """)
+        else:
+            self.toggle_btn.setText("Enable Balancing")
+            self.toggle_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: rgb(50, 150, 50);
+                    color: white;
+                    font-weight: bold;
+                    border-radius: 4px;
+                }
+                QPushButton:hover {
+                    background-color: rgb(70, 170, 70);
+                }
+            """)
+    
+    def on_frequency_changed(self, value: int):
+        """Handle frequency change from spinbox"""
+        self.balancing_read_interval = value
+        # If timer is running, restart it with new interval
+        if self.balancing_timer.isActive():
+            self.balancing_timer.setInterval(value * 1000)
+    
+    def _start_balancing_timer(self):
+        """Start the balancing status read timer"""
+        interval_ms = self.balancing_read_interval * 1000
+        self.balancing_timer.start(interval_ms)
+        # Request immediately once when enabled
+        self._request_balancing_status()
+    
+    def _stop_balancing_timer(self):
+        """Stop the balancing status read timer"""
+        self.balancing_timer.stop()
+    
+    def _request_balancing_status(self):
+        """Emit signal to request balancing status from BMS"""
+        self.request_balancing_status.emit()
     
     def update_balancing_state(self, state: int):
         """Update balancing state (cell-wise) from BMS"""
@@ -446,13 +576,21 @@ class BalancingPage(QWidget):
     
     def update_balancing_enabled(self, enabled: bool):
         """Update balancing enabled status from BMS (Version 0.2)"""
+        was_enabled = self.balancing_enabled
         self.balancing_enabled = enabled
+        self._update_toggle_button_style()
+        
         if enabled:
-            self.enable_btn.setText("Disable")
-            self.enable_btn.setStyleSheet("background-color: rgb(200, 50, 50);")
+            # If BMS says balancing is on but our timer isn't running, start it
+            if not self.balancing_timer.isActive():
+                self._start_balancing_timer()
         else:
-            self.enable_btn.setText("Enable")
-            self.enable_btn.setStyleSheet("")
+            # If BMS says balancing is off, stop the timer and clear indicators
+            if self.balancing_timer.isActive():
+                self._stop_balancing_timer()
+            # Set all cells to not balancing (red dots) when disabled
+            self.balancing_state = 0
+            self.update_balancing_indicators()
     
     def update_balancing_indicators(self):
         """Update cell balancing indicators based on current state"""

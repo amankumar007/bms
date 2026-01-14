@@ -672,6 +672,14 @@ class PlotPage(QWidget):
                 log_entry[f'master_temp_{i+1}'] = t if t is not None else ''
                 log_entry[f'master_temp_{i+1}_hex'] = self._float_to_hex(t) if t is not None else ''
             
+            # Master Die Temperatures
+            die1 = data_point.get('master_die_temp_1')
+            log_entry['master_die_temp_1'] = die1 if die1 is not None else ''
+            log_entry['master_die_temp_1_hex'] = self._float_to_hex(die1) if die1 is not None else ''
+            die2 = data_point.get('master_die_temp_2')
+            log_entry['master_die_temp_2'] = die2 if die2 is not None else ''
+            log_entry['master_die_temp_2_hex'] = self._float_to_hex(die2) if die2 is not None else ''
+            
             for slave_id in sorted(self.known_slaves):
                 for cell in range(self.MAX_CELLS):
                     v = data_point.get(f'slave_{slave_id}_cell_{cell+1}_v')
@@ -679,6 +687,12 @@ class PlotPage(QWidget):
                 for zone in range(self.MAX_TEMP_ZONES):
                     t = data_point.get(f'slave_{slave_id}_temp_{zone+1}')
                     log_entry[f'slave_{slave_id}_temp_{zone+1}'] = t if t is not None else ''
+                
+                # Slave Die Temperatures
+                s_die1 = data_point.get(f'slave_{slave_id}_die_temp_1')
+                log_entry[f'slave_{slave_id}_die_temp_1'] = s_die1 if s_die1 is not None else ''
+                s_die2 = data_point.get(f'slave_{slave_id}_die_temp_2')
+                log_entry[f'slave_{slave_id}_die_temp_2'] = s_die2 if s_die2 is not None else ''
             
             if not self.log_header_written:
                 self.log_file.write(','.join(log_entry.keys()) + '\n')
@@ -707,6 +721,11 @@ class PlotPage(QWidget):
         for i in range(self.MAX_TEMP_ZONES):
             data_point[f'master_temp_{i+1}'] = master_temps[i] if i < len(master_temps) else None
         
+        # Master Die Temperatures
+        master_die_temps = data.get('master_die_temps', [])
+        data_point['master_die_temp_1'] = master_die_temps[0] if len(master_die_temps) > 0 else None
+        data_point['master_die_temp_2'] = master_die_temps[1] if len(master_die_temps) > 1 else None
+        
         slave_data = data.get('slave_data', {})
         
         # Track new slaves and create tabs (only if within configured limit)
@@ -724,16 +743,24 @@ class PlotPage(QWidget):
                         old_point[f'slave_{slave_id}_cell_{cell+1}_v'] = None
                     for zone in range(self.MAX_TEMP_ZONES):
                         old_point[f'slave_{slave_id}_temp_{zone+1}'] = None
+                    # Backfill die temps
+                    old_point[f'slave_{slave_id}_die_temp_1'] = None
+                    old_point[f'slave_{slave_id}_die_temp_2'] = None
         
         for slave_id in self.known_slaves:
             slave_info = slave_data.get(slave_id, {})
             voltages = slave_info.get('voltages', [])
             temperatures = slave_info.get('temperatures', [])
+            die_temps = slave_info.get('die_temps', [])
             
             for cell in range(self.MAX_CELLS):
                 data_point[f'slave_{slave_id}_cell_{cell+1}_v'] = voltages[cell] if cell < len(voltages) else None
             for zone in range(self.MAX_TEMP_ZONES):
                 data_point[f'slave_{slave_id}_temp_{zone+1}'] = temperatures[zone] if zone < len(temperatures) else None
+            
+            # Slave Die Temperatures
+            data_point[f'slave_{slave_id}_die_temp_1'] = die_temps[0] if len(die_temps) > 0 else None
+            data_point[f'slave_{slave_id}_die_temp_2'] = die_temps[1] if len(die_temps) > 1 else None
         
         # Calculate averages
         valid_voltages = [v for v in master_voltages if v is not None]

@@ -276,11 +276,7 @@ class MainWindow(QMainWindow):
         # Balancing page connections
         self.balancing_page.balancing_changed.connect(self.on_balancing_changed)
         self.balancing_page.balancing_sequence_changed.connect(self.on_balancing_sequence_changed)
-        
-        # Timer for updating balancing state
-        self.balancing_update_timer = QTimer()
-        self.balancing_update_timer.timeout.connect(self.update_balancing_states)
-        self.balancing_update_timer.start(2000)  # Update every 2 seconds
+        self.balancing_page.request_balancing_status.connect(self.update_balancing_states)
         
         # Debug page connections
         self.debug_page.command_sent.connect(self.on_debug_command_sent)
@@ -457,6 +453,9 @@ class MainWindow(QMainWindow):
         # Update plot page slave tabs
         self.plot_page.update_slave_count(num_slaves)
         
+        # Update balancing page device dropdown
+        self.balancing_page.update_slave_count(num_slaves)
+        
         if self.bms_connection.is_connected:
             self.logger.log_app("INFO", f"Setting number of slaves to {num_slaves}")
             if self.bms_connection.set_num_slaves(num_slaves):
@@ -583,11 +582,17 @@ class MainWindow(QMainWindow):
             success = self.bms_connection.set_balancing_sequence(device_id, sequence)
             if success:
                 self.status_bar.showMessage(f"Balancing sequence set for device {device_id}")
+                
+                # Also enable balancing when pattern is applied
+                self.bms_connection.set_balancing(device_id, True)
+                # Update UI to show balancing is enabled
+                self.balancing_page.update_balancing_enabled(True)
             else:
                 StyledMessageBox.warning(self, "Balancing Error", "Failed to set balancing sequence")
         
-        # Update balancing state display
+        # Update balancing state and status display
         if self.bms_connection.is_connected:
+            # Read cell-wise balancing state
             state = self.bms_connection.read_balancing_state(device_id)
             if state is not None:
                 self.balancing_page.update_balancing_state(state)
@@ -629,9 +634,9 @@ class MainWindow(QMainWindow):
         self.logger.log_app("INFO", "Application closing...")
         
         try:
-            # Stop balancing update timer
-            if hasattr(self, 'balancing_update_timer'):
-                self.balancing_update_timer.stop()
+            # Stop balancing timer in balancing page
+            if hasattr(self, 'balancing_page') and hasattr(self.balancing_page, 'balancing_timer'):
+                self.balancing_page.balancing_timer.stop()
                 self.logger.log_app("DEBUG", "Balancing timer stopped")
             
             # Cleanup plot page (stops timer, saves log file)
