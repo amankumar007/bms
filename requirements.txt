@@ -15,6 +15,9 @@ numpy>=1.24.0
 # Plotting
 plotly>=5.17.0
 
+# USB HID Communication
+hidapi>=0.14.0
+
 # Build Tools (optional - only needed for creating executables)
 # pyinstaller>=6.0.0
 

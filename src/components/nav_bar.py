@@ -40,7 +40,8 @@ class NavBar(QWidget):
             ("Graph/Plotting", "Data visualization and logging"),
             ("Balancing", "Cell balancing control"),
             ("Debugging", "BMS IC command interface"),
-            ("Console", "BMS communication and application logs")
+            ("Console", "BMS communication and application logs"),
+            ("Firmware Upgrade", "BMS firmware upgrade utility")
         ]
         
         self.button_group = QButtonGroup(self)

@@ -15,6 +15,7 @@ from src.components.plot_page import PlotPage
 from src.components.balancing_page import BalancingPage
 from src.components.debug_page import DebugPage
 from src.components.console_page import ConsolePage
+from src.components.firmware_upgrade_page import FirmwareUpgradePage
 from src.data.bms_connection import BMSConnection
 from src.utils.logger import get_logger
 from src.utils.message_box import StyledMessageBox
@@ -86,6 +87,7 @@ class MainWindow(QMainWindow):
         self.balancing_page = BalancingPage()
         self.debug_page = DebugPage()
         self.console_page = ConsolePage()
+        self.firmware_upgrade_page = FirmwareUpgradePage()
         
         # Store all pages in a dictionary for easy access
         self.pages = {
@@ -93,7 +95,8 @@ class MainWindow(QMainWindow):
             "Graph/Plotting": self.plot_page,
             "Balancing": self.balancing_page,
             "Debugging": self.debug_page,
-            "Console": self.console_page
+            "Console": self.console_page,
+            "Firmware Upgrade": self.firmware_upgrade_page
         }
         
         # Initially show master page
@@ -645,6 +648,11 @@ class MainWindow(QMainWindow):
                     self.logger.log_app("INFO", f"Saving log file: {self.plot_page.log_file_path}")
                 self.plot_page.cleanup()
                 self.logger.log_app("DEBUG", "Plot page cleanup complete")
+            
+            # Cleanup firmware upgrade page
+            if hasattr(self, 'firmware_upgrade_page'):
+                self.firmware_upgrade_page.cleanup()
+                self.logger.log_app("DEBUG", "Firmware upgrade page cleanup complete")
             
             # Disconnect from BMS if connected
             if self.bms_connection.is_connected:
