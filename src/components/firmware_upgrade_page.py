@@ -7,7 +7,8 @@ import os
 import re
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QLineEdit, QProgressBar, QFileDialog, QMessageBox, QFrame
+    QLineEdit, QProgressBar, QFileDialog, QMessageBox, QFrame,
+    QComboBox, QGroupBox
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QThread
 from PyQt6.QtGui import QFont
@@ -58,15 +59,10 @@ class FirmwareUpgradePage(QWidget):
         self.firmware_file_path = ""
         self.firmware_data = None
         self.upgrade_thread = None
+        self.available_devices = []  # List of (vid, pid, name, manufacturer, product, serial) tuples
         
-        # Start device discovery
-        self.hid_connection.start_device_discovery()
-        
-        # Check for device periodically
-        self.check_device_timer = self.hid_connection.discovery_timer
-        
-        # Auto-connect when device is found
-        self.auto_connect_enabled = True
+        # Scan for devices on startup
+        self.on_scan_devices()
     
     def setup_ui(self):
         """Setup the firmware upgrade UI layout"""
@@ -89,6 +85,91 @@ class FirmwareUpgradePage(QWidget):
         separator.setFrameShape(QFrame.Shape.HLine)
         separator.setStyleSheet("color: rgb(2, 44, 34);")
         main_layout.addWidget(separator)
+        
+        # Device Selection Group
+        device_group = QGroupBox("Device Selection")
+        device_group.setStyleSheet("""
+            QGroupBox {
+                font-weight: bold;
+                border: 2px solid rgb(2, 44, 34);
+                border-radius: 8px;
+                margin-top: 1ex;
+                padding-top: 10px;
+                color: rgb(240, 248, 255);
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 5px 0 5px;
+                color: rgb(50, 205, 50);
+            }
+        """)
+        device_layout = QHBoxLayout(device_group)
+        device_layout.setSpacing(10)
+        
+        device_label = QLabel("HID Device:")
+        device_label.setFont(QFont("Arial", 12))
+        device_label.setStyleSheet("color: rgb(240, 248, 255);")
+        device_layout.addWidget(device_label)
+        
+        self.device_combo = QComboBox()
+        self.device_combo.setMinimumWidth(300)
+        self.device_combo.setEditable(False)
+        self.device_combo.currentIndexChanged.connect(self.on_device_selected)
+        device_layout.addWidget(self.device_combo)
+        
+        self.scan_button = QPushButton("Scan Devices")
+        self.scan_button.setFont(QFont("Arial", 12))
+        self.scan_button.setStyleSheet("""
+            QPushButton {
+                background-color: rgb(2, 44, 34);
+                color: rgb(240, 248, 255);
+                border: 2px solid rgb(34, 139, 34);
+                border-radius: 4px;
+                padding: 8px 15px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: rgb(34, 139, 34);
+                border-color: rgb(50, 205, 50);
+            }
+            QPushButton:pressed {
+                background-color: rgb(0, 25, 20);
+            }
+        """)
+        self.scan_button.clicked.connect(self.on_scan_devices)
+        device_layout.addWidget(self.scan_button)
+        
+        self.connect_button = QPushButton("Connect")
+        self.connect_button.setFont(QFont("Arial", 12))
+        self.connect_button.setStyleSheet("""
+            QPushButton {
+                background-color: rgb(2, 44, 34);
+                color: rgb(240, 248, 255);
+                border: 2px solid rgb(34, 139, 34);
+                border-radius: 4px;
+                padding: 8px 15px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: rgb(34, 139, 34);
+                border-color: rgb(50, 205, 50);
+            }
+            QPushButton:pressed {
+                background-color: rgb(0, 25, 20);
+            }
+            QPushButton:disabled {
+                background-color: rgb(15, 35, 30);
+                border-color: rgb(25, 45, 40);
+                color: rgb(100, 100, 100);
+            }
+        """)
+        self.connect_button.clicked.connect(self.on_connect_clicked)
+        self.connect_button.setEnabled(False)  # Disabled until device is selected
+        device_layout.addWidget(self.connect_button)
+        
+        device_layout.addStretch()
+        main_layout.addWidget(device_group)
         
         # Row 1: Status, Serial No, Software version
         row1_layout = QHBoxLayout()
@@ -448,6 +529,8 @@ class FirmwareUpgradePage(QWidget):
                     font-weight: bold;
                 }
             """)
+            self.connect_button.setText("Disconnect")
+            self.connect_button.setEnabled(True)
             # Request device info
             self.hid_connection.request_device_info()
             # Enable upgrade button if firmware is loaded
@@ -466,6 +549,8 @@ class FirmwareUpgradePage(QWidget):
                     font-weight: bold;
                 }
             """)
+            self.connect_button.setText("Connect")
+            self.connect_button.setEnabled(True)
             self.serial_field.setText("")
             self.present_version_field.setText("")
             self.upgrade_button.setEnabled(False)
@@ -512,6 +597,80 @@ class FirmwareUpgradePage(QWidget):
     def set_vid_pid(self, vid: int, pid: int):
         """Set Vendor ID and Product ID for device identification"""
         self.hid_connection.set_vid_pid(vid, pid)
+    
+    def on_scan_devices(self):
+        """Scan for available HID devices"""
+        self.logger.log_app("INFO", "Scanning for HID devices...")
+        self.update_notification("Scanning for HID devices...")
+        
+        devices = HIDConnection.enumerate_devices()
+        self.available_devices = []
+        self.device_combo.clear()
+        
+        if not devices:
+            self.device_combo.addItem("No HID devices found")
+            self.update_notification("No HID devices found. Make sure device is connected.")
+            self.logger.log_app("WARNING", "No HID devices found")
+            return
+        
+        # Add devices to combo box
+        for device_info in devices:
+            vid = device_info.get('vendor_id', 0)
+            pid = device_info.get('product_id', 0)
+            manufacturer = device_info.get('manufacturer_string', 'Unknown')
+            product = device_info.get('product_string', 'Unknown')
+            serial = device_info.get('serial_number', '')
+            
+            # Create display name
+            name = f"VID:{vid:04X} PID:{pid:04X} - {product}"
+            if manufacturer and manufacturer != 'Unknown':
+                name += f" ({manufacturer})"
+            
+            self.device_combo.addItem(name)
+            self.available_devices.append((vid, pid, name, manufacturer, product, serial))
+        
+        self.logger.log_app("INFO", f"Found {len(self.available_devices)} HID device(s)")
+        self.update_notification(f"Found {len(self.available_devices)} HID device(s). Select a device and click Connect.")
+    
+    def on_device_selected(self, index: int):
+        """Handle device selection from combo box"""
+        if index >= 0 and index < len(self.available_devices):
+            vid, pid, name, manufacturer, product, serial = self.available_devices[index]
+            self.hid_connection.set_vid_pid(vid, pid)
+            self.logger.log_app("INFO", f"Selected device: {name} (VID:{vid:04X}, PID:{pid:04X})")
+            self.update_notification(f"Device selected: {product}. Click Connect to establish connection.")
+            self.connect_button.setEnabled(True)
+        else:
+            self.connect_button.setEnabled(False)
+    
+    def on_connect_clicked(self):
+        """Handle connect button click"""
+        if self.hid_connection.is_connected:
+            # Disconnect
+            self.hid_connection.disconnect()
+            self.connect_button.setText("Connect")
+            self.update_notification("Disconnected from device")
+        else:
+            # Connect
+            if len(self.available_devices) == 0:
+                self.update_notification("No device selected. Please scan and select a device.")
+                return
+            
+            current_index = self.device_combo.currentIndex()
+            if current_index < 0 or current_index >= len(self.available_devices):
+                self.update_notification("Please select a device first.")
+                return
+            
+            self.update_notification("Connecting to device...")
+            self.connect_button.setEnabled(False)
+            
+            # Try to connect
+            if self.hid_connection.connect():
+                self.connect_button.setText("Disconnect")
+                self.update_notification("Connected to device. Requesting device information...")
+            else:
+                self.update_notification("Failed to connect to device. Check device and try again.")
+                self.connect_button.setEnabled(True)
     
     def cleanup(self):
         """Cleanup resources"""

@@ -116,9 +116,8 @@ class ModbusRTU:
     ADDR_PACK_CURRENT = 0x05
     ADDR_CELL_VOLTAGE = 0x06
     ADDR_TEMPERATURE = 0x07
-    ADDR_BALANCING = 0x08
-    ADDR_BALANCING_SEQ = 0x09
-    ADDR_BALANCING_STATE = 0x0A
+    ADDR_BALANCING = 0x08      # 3.8.1 / 3.8.2  ON/OFF (write & read)
+    ADDR_BALANCING_SEQ = 0x09  # 3.8.3 / 3.8.4  cell sequence (write & read)
     ADDR_DIE_TEMP_1 = 0x0C  # Version 0.3
     ADDR_DIE_TEMP_2 = 0x0D  # Version 0.3
     

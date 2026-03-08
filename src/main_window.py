@@ -580,25 +580,42 @@ class MainWindow(QMainWindow):
                 StyledMessageBox.warning(self, "Balancing Error", "Failed to set balancing state")
     
     def on_balancing_sequence_changed(self, device_id: int, sequence: int):
-        """Handle balancing sequence change"""
-        if self.bms_connection.is_connected:
-            success = self.bms_connection.set_balancing_sequence(device_id, sequence)
-            if success:
-                self.status_bar.showMessage(f"Balancing sequence set for device {device_id}")
-                
-                # Also enable balancing when pattern is applied
-                self.bms_connection.set_balancing(device_id, True)
-                # Update UI to show balancing is enabled
-                self.balancing_page.update_balancing_enabled(True)
-            else:
-                StyledMessageBox.warning(self, "Balancing Error", "Failed to set balancing sequence")
-        
-        # Update balancing state and status display
-        if self.bms_connection.is_connected:
-            # Read cell-wise balancing state
-            state = self.bms_connection.read_balancing_state(device_id)
-            if state is not None:
-                self.balancing_page.update_balancing_state(state)
+        """Handle balancing sequence change (config only – does NOT enable balancing)
+
+        Protocol flow:
+          1. If balancing is currently ON, disable it first (§3.8.1)
+          2. Write new sequence to address 0x09 (§3.8.3)
+          3. Read-back from address 0x09 (§3.8.4) to confirm what BMS stored
+          4. Leave balancing disabled – user must press Enable to start
+        """
+        if not self.bms_connection.is_connected:
+            self.balancing_page.notify_config_result(False, sequence)
+            StyledMessageBox.warning(self, "Not Connected", "Please connect to BMS first")
+            return
+
+        # If balancing is currently ON, disable first so BMS accepts the new sequence
+        was_enabled = self.balancing_page.balancing_enabled
+        if was_enabled:
+            self.bms_connection.set_balancing(device_id, False)
+            self.balancing_page.update_balancing_enabled(False)
+
+        success = self.bms_connection.set_balancing_sequence(device_id, sequence)
+        if success:
+            readback = self.bms_connection.read_balancing_state(device_id)
+            self.balancing_page.notify_config_result(True, sequence, readback)
+
+            msg = (
+                f"Balancing config applied for device {device_id} "
+                f"(sent: 0x{sequence:04X}, BMS: 0x{readback:04X})"
+                if readback is not None
+                else f"Balancing config sent for device {device_id} (0x{sequence:04X})"
+            )
+            if was_enabled:
+                msg += " — balancing was stopped, press Enable to restart"
+            self.status_bar.showMessage(msg)
+        else:
+            self.balancing_page.notify_config_result(False, sequence)
+            StyledMessageBox.warning(self, "Balancing Error", "Failed to set balancing sequence")
     
     def on_debug_command_sent(self, command_bytes: bytes):
         """Handle debug command sent"""
